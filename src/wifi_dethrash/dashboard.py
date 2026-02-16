@@ -60,7 +60,7 @@ def generate_dashboard(aps: list[APInfo]) -> str:
             "title": "Connect/Disconnect Events",
             "type": "logs",
             "gridPos": {"h": 8, "w": 24, "x": 0, "y": 16},
-            "datasource": {"type": "victorialogs-datasource", "uid": "${DS_VICTORIALOGS}"},
+            "datasource": {"type": "victoriametrics-logs-datasource", "uid": "${DS_VICTORIALOGS}"},
             "targets": [
                 {
                     "refId": "A",
@@ -86,7 +86,7 @@ def generate_dashboard(aps: list[APInfo]) -> str:
                 "label": "VictoriaLogs",
                 "description": "VictoriaLogs datasource with hostapd syslog events",
                 "type": "datasource",
-                "pluginId": "victorialogs-datasource",
+                "pluginId": "victoriametrics-logs-datasource",
                 "pluginName": "VictoriaLogs",
             },
         ],
