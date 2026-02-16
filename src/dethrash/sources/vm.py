@@ -1,0 +1,123 @@
+from dataclasses import dataclass
+from datetime import datetime
+
+import httpx
+
+
+@dataclass(frozen=True)
+class APInfo:
+    hostname: str
+    instance: str
+
+
+@dataclass(frozen=True)
+class RSSIReading:
+    mac: str
+    ap: str
+    ifname: str
+    rssi: int
+    timestamp: int
+
+
+@dataclass(frozen=True)
+class NoiseReading:
+    ap: str
+    radio: str
+    frequency: int
+    noise_dbm: int
+    timestamp: int
+
+
+class VictoriaMetricsClient:
+    def __init__(self, base_url: str, host_label: str = "instance"):
+        self._base_url = base_url.rstrip("/")
+        self._host_label = host_label
+        self._client = httpx.Client(timeout=30)
+
+    def _hostname_from_label(self, label_value: str) -> str:
+        """Extract hostname from label value. 'mowgli:9100' -> 'mowgli'."""
+        return label_value.split(":")[0] if ":" in label_value else label_value
+
+    def discover_aps(self) -> list[APInfo]:
+        """Discover APs from metric label values."""
+        resp = self._client.get(
+            f"{self._base_url}/api/v1/label/{self._host_label}/values",
+            params={"match[]": "wifi_station_signal_dbm"},
+        )
+        resp.raise_for_status()
+        values = resp.json()["data"]
+        return [
+            APInfo(
+                hostname=self._hostname_from_label(v),
+                instance=v,
+            )
+            for v in sorted(values)
+        ]
+
+    def fetch_rssi(
+        self,
+        start: datetime,
+        end: datetime,
+        macs: list[str] | None = None,
+        step: str = "30s",
+    ) -> list[RSSIReading]:
+        """Fetch wifi_station_signal_dbm over time window."""
+        query = "wifi_station_signal_dbm"
+        if macs:
+            mac_re = "|".join(macs)
+            query = f'wifi_station_signal_dbm{{mac=~"{mac_re}"}}'
+
+        resp = self._client.get(
+            f"{self._base_url}/api/v1/query_range",
+            params={
+                "query": query,
+                "start": start.isoformat(),
+                "end": end.isoformat(),
+                "step": step,
+            },
+        )
+        resp.raise_for_status()
+
+        readings = []
+        for series in resp.json()["data"]["result"]:
+            metric = series["metric"]
+            ap = self._hostname_from_label(metric.get(self._host_label, ""))
+            mac = metric["mac"]
+            ifname = metric["ifname"]
+            for ts, val in series["values"]:
+                readings.append(RSSIReading(
+                    mac=mac, ap=ap, ifname=ifname,
+                    rssi=int(float(val)), timestamp=int(ts),
+                ))
+        return readings
+
+    def fetch_noise(
+        self,
+        start: datetime,
+        end: datetime,
+        step: str = "30s",
+    ) -> list[NoiseReading]:
+        """Fetch wifi_network_noise_dbm over time window."""
+        resp = self._client.get(
+            f"{self._base_url}/api/v1/query_range",
+            params={
+                "query": "wifi_network_noise_dbm",
+                "start": start.isoformat(),
+                "end": end.isoformat(),
+                "step": step,
+            },
+        )
+        resp.raise_for_status()
+
+        readings = []
+        for series in resp.json()["data"]["result"]:
+            metric = series["metric"]
+            ap = self._hostname_from_label(metric.get(self._host_label, ""))
+            radio = metric.get("device", "")
+            freq = int(metric.get("frequency", "0"))
+            for ts, val in series["values"]:
+                readings.append(NoiseReading(
+                    ap=ap, radio=radio, frequency=freq,
+                    noise_dbm=int(float(val)), timestamp=int(ts),
+                ))
+        return readings
