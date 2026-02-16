@@ -1,4 +1,26 @@
+import re
+from datetime import datetime, timedelta, timezone
+
 import click
+
+from wifi_dethrash.sources.vm import VictoriaMetricsClient
+from wifi_dethrash.sources.vl import VictoriaLogsClient
+from wifi_dethrash.analyzers.thrashing import ThrashingDetector
+from wifi_dethrash.analyzers.overlap import OverlapAnalyzer
+from wifi_dethrash.analyzers.weak import WeakAssociationAnalyzer
+from wifi_dethrash.recommender import Recommender
+from wifi_dethrash.report import render_report
+
+
+def _parse_window(window: str) -> timedelta:
+    """Parse '1h', '24h', '7d' into timedelta."""
+    m = re.match(r"^(\d+)([hd])$", window)
+    if not m:
+        raise click.BadParameter(f"Invalid window format: {window}. Use e.g. 1h, 24h, 7d")
+    val, unit = int(m.group(1)), m.group(2)
+    if unit == "h":
+        return timedelta(hours=val)
+    return timedelta(days=val)
 
 
 @click.command()
@@ -9,7 +31,53 @@ import click
 @click.option("--mac", multiple=True, help="Filter to specific MAC address(es)")
 @click.option("--generate-dashboard", type=click.Path(), default=None,
               help="Write Grafana dashboard JSON to file and exit")
-def main(vm_url, vl_url, window, host_label, mac, generate_dashboard):
+@click.option("--overlap-threshold", default=6, help="Max RSSI diff (dB) to count as overlap")
+@click.option("--snr-threshold", default=15, help="Min SNR (dB) for a healthy association")
+@click.option("--target-power", default=14, help="Recommended TX power (dBm)")
+def main(vm_url, vl_url, window, host_label, mac, generate_dashboard,
+         overlap_threshold, snr_threshold, target_power):
     """WiFi mesh thrashing analyzer for OpenWrt."""
-    click.echo(f"vm_url={vm_url} vl_url={vl_url} window={window}")
-    click.echo("Not implemented yet.")
+    delta = _parse_window(window)
+    end = datetime.now(timezone.utc)
+    start = end - delta
+
+    macs = list(mac) if mac else None
+
+    with VictoriaMetricsClient(vm_url, host_label=host_label) as vm:
+        if generate_dashboard:
+            from wifi_dethrash.dashboard import generate_dashboard as gen_dash
+            aps = vm.discover_aps()
+            dashboard_json = gen_dash(aps)
+            with open(generate_dashboard, "w") as f:
+                f.write(dashboard_json)
+            click.echo(f"Dashboard written to {generate_dashboard}")
+            return
+
+        click.echo(f"Discovering APs from {vm_url} ...")
+        aps = vm.discover_aps()
+        click.echo(f"Found {len(aps)} APs: {', '.join(a.hostname for a in aps)}")
+
+        click.echo(f"Fetching RSSI data ({window} window) ...")
+        rssi = vm.fetch_rssi(start, end, macs=macs)
+
+        click.echo("Fetching noise floor data ...")
+        noise = vm.fetch_noise(start, end)
+
+    with VictoriaLogsClient(vl_url) as vl:
+        click.echo("Fetching hostapd events ...")
+        events = vl.fetch_events(start, end, macs=macs)
+
+    click.echo(f"Got {len(rssi)} RSSI readings, {len(events)} hostapd events.")
+
+    click.echo("Analyzing ...")
+    thrash = ThrashingDetector().detect(events)
+    overlap = OverlapAnalyzer(overlap_threshold).analyze(rssi)
+    weak = WeakAssociationAnalyzer(snr_threshold).analyze(rssi, noise)
+
+    rec = Recommender(target_power=target_power, min_snr_value=snr_threshold)
+    commands = rec.txpower_commands(thrash, overlap) + rec.usteer_commands(weak)
+
+    click.echo("")
+    click.echo(render_report(
+        thrash=thrash, overlap=overlap, weak=weak, commands=commands,
+    ))
