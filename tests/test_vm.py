@@ -1,6 +1,6 @@
 import pytest
 from datetime import datetime, timezone
-from wifi_dethrash.sources.vm import VictoriaMetricsClient, APInfo, RSSIReading
+from wifi_dethrash.sources.vm import VictoriaMetricsClient, APInfo, RSSIReading, TxPowerReading
 
 
 # --- Fixtures ---
@@ -138,3 +138,115 @@ class TestFetchNoise:
         assert noise[0].radio == "radio1"
         assert noise[0].frequency == 5745
         assert noise[0].noise_dbm == -92
+
+
+TXPOWER_RESPONSE = {
+    "data": {
+        "resultType": "vector",
+        "result": [
+            {
+                "metric": {"device": "radio1", "ifname": "phy1-ap0",
+                           "ssid": "MyNet", "instance": "mowgli:9100"},
+                "value": [1700000000, "20"],
+            },
+            {
+                "metric": {"device": "radio0", "ifname": "phy0-ap0",
+                           "ssid": "MyNet", "instance": "mowgli:9100"},
+                "value": [1700000000, "14"],
+            },
+        ],
+    }
+}
+
+CONFIGURED_TXPOWER_RESPONSE = {
+    "data": {
+        "resultType": "vector",
+        "result": [
+            {
+                "metric": {"device": "radio1", "instance": "mowgli:9100"},
+                "value": [1700000000, "23"],
+            },
+        ],
+    }
+}
+
+CHANNEL_RESPONSE = {
+    "data": {
+        "resultType": "vector",
+        "result": [
+            {
+                "metric": {"device": "radio1", "instance": "mowgli:9100"},
+                "value": [1700000000, "149"],
+            },
+        ],
+    }
+}
+
+FREQUENCY_RESPONSE = {
+    "data": {
+        "resultType": "vector",
+        "result": [
+            {
+                "metric": {"device": "radio1", "instance": "mowgli:9100"},
+                "value": [1700000000, "5745"],
+            },
+        ],
+    }
+}
+
+
+class TestFetchTxPower:
+    def test_returns_txpower_per_radio(self, respx_mock):
+        respx_mock.get("http://vm:8428/api/v1/query").mock(
+            side_effect=lambda request: _txpower_route(request)
+        )
+
+        with VictoriaMetricsClient("http://vm:8428") as client:
+            readings = client.fetch_txpower()
+
+        assert len(readings) == 2
+        r1 = next(r for r in readings if r.radio == "radio1")
+        assert r1.ap == "mowgli"
+        assert r1.txpower_dbm == 20
+        assert r1.configured_txpower == 23
+        assert r1.channel == 149
+        assert r1.frequency_mhz == 5745
+
+    def test_works_without_configured_txpower(self, respx_mock):
+        respx_mock.get("http://vm:8428/api/v1/query").mock(
+            side_effect=lambda request: _txpower_route_minimal(request)
+        )
+
+        with VictoriaMetricsClient("http://vm:8428") as client:
+            readings = client.fetch_txpower()
+
+        assert len(readings) == 1
+        assert readings[0].txpower_dbm == 20
+        assert readings[0].configured_txpower is None
+
+
+def _txpower_route(request):
+    import httpx
+    query = dict(request.url.params).get("query", "")
+    if query == "wifi_radio_txpower_dbm":
+        return httpx.Response(200, json=TXPOWER_RESPONSE)
+    elif query == "wifi_radio_configured_txpower":
+        return httpx.Response(200, json=CONFIGURED_TXPOWER_RESPONSE)
+    elif query == "wifi_radio_channel":
+        return httpx.Response(200, json=CHANNEL_RESPONSE)
+    elif query == "wifi_radio_frequency_mhz":
+        return httpx.Response(200, json=FREQUENCY_RESPONSE)
+    return httpx.Response(200, json={"data": {"resultType": "vector", "result": []}})
+
+
+def _txpower_route_minimal(request):
+    import httpx
+    query = dict(request.url.params).get("query", "")
+    if query == "wifi_radio_txpower_dbm":
+        resp = {"data": {"resultType": "vector", "result": [
+            {"metric": {"device": "radio1", "ifname": "phy1-ap0",
+                         "instance": "mowgli:9100"},
+             "value": [1700000000, "20"]},
+        ]}}
+        return httpx.Response(200, json=resp)
+    return httpx.Response(200, json={"data": {"resultType": "vector", "result": []}})

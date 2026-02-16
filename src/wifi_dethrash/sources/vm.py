@@ -28,6 +28,17 @@ class NoiseReading:
     timestamp: int
 
 
+@dataclass(frozen=True)
+class TxPowerReading:
+    ap: str
+    radio: str
+    ifname: str
+    txpower_dbm: int
+    configured_txpower: int | None
+    channel: int
+    frequency_mhz: int
+
+
 class VictoriaMetricsClient:
     def __init__(self, base_url: str, host_label: str = "instance"):
         self._base_url = base_url.rstrip("/")
@@ -129,4 +140,69 @@ class VictoriaMetricsClient:
                     ap=ap, radio=radio, frequency=freq,
                     noise_dbm=int(float(val)), timestamp=int(ts),
                 ))
+        return readings
+
+    def fetch_txpower(self) -> list[TxPowerReading]:
+        """Fetch current txpower per radio from wifi_radio_txpower_dbm (instant query)."""
+        # Fetch effective txpower
+        resp = self._client.get(
+            f"{self._base_url}/api/v1/query",
+            params={"query": "wifi_radio_txpower_dbm"},
+        )
+        resp.raise_for_status()
+
+        # Build configured txpower lookup: (ap, radio) -> configured value
+        configured: dict[tuple[str, str], int] = {}
+        try:
+            resp_cfg = self._client.get(
+                f"{self._base_url}/api/v1/query",
+                params={"query": "wifi_radio_configured_txpower"},
+            )
+            resp_cfg.raise_for_status()
+            for series in resp_cfg.json()["data"]["result"]:
+                m = series["metric"]
+                ap = self._hostname_from_label(m.get(self._host_label, ""))
+                radio = m.get("device", "")
+                configured[(ap, radio)] = int(float(series["value"][1]))
+        except Exception:
+            pass  # configured txpower is optional
+
+        # Fetch channel/frequency from wifi_radio_channel and wifi_radio_frequency_mhz
+        channels: dict[tuple[str, str], int] = {}
+        frequencies: dict[tuple[str, str], int] = {}
+        for metric_name, target_dict in [
+            ("wifi_radio_channel", channels),
+            ("wifi_radio_frequency_mhz", frequencies),
+        ]:
+            try:
+                r = self._client.get(
+                    f"{self._base_url}/api/v1/query",
+                    params={"query": metric_name},
+                )
+                r.raise_for_status()
+                for series in r.json()["data"]["result"]:
+                    m = series["metric"]
+                    ap = self._hostname_from_label(m.get(self._host_label, ""))
+                    radio = m.get("device", "")
+                    target_dict[(ap, radio)] = int(float(series["value"][1]))
+            except Exception:
+                pass
+
+        readings = []
+        for series in resp.json()["data"]["result"]:
+            m = series["metric"]
+            ap = self._hostname_from_label(m.get(self._host_label, ""))
+            radio = m.get("device", "")
+            ifname = m.get("ifname", "")
+            txpower = int(float(series["value"][1]))
+            readings.append(TxPowerReading(
+                ap=ap,
+                radio=radio,
+                ifname=ifname,
+                txpower_dbm=txpower,
+                configured_txpower=configured.get((ap, radio)),
+                channel=channels.get((ap, radio), 0),
+                frequency_mhz=frequencies.get((ap, radio), 0),
+            ))
+
         return readings
