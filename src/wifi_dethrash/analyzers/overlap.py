@@ -12,6 +12,8 @@ class OverlapResult:
     rssi_diff: float               # mean abs RSSI difference when overlapping
     overlap_count: int             # number of timestamps with overlap
     total_samples: int             # total timestamps where both APs saw the MAC
+    avg_rssi_a: float = 0.0       # avg RSSI for ap_pair[0] during overlap
+    avg_rssi_b: float = 0.0       # avg RSSI for ap_pair[1] during overlap
     ifname_a: str = ""             # ifname on ap_pair[0]
     ifname_b: str = ""             # ifname on ap_pair[1]
 
@@ -28,27 +30,33 @@ class OverlapAnalyzer:
         # Track ifname per (mac, ap) — last seen wins (they're consistent per radio)
         ifname_by_mac_ap: dict[tuple[str, str], str] = {}
         for r in readings:
-            by_mac_ts[r.mac][r.timestamp][r.ap] = r.rssi
-            ifname_by_mac_ap[(r.mac, r.ap)] = r.ifname
+            mac = r.mac.lower()
+            by_mac_ts[mac][r.timestamp][r.ap] = r.rssi
+            ifname_by_mac_ap[(mac, r.ap)] = r.ifname
 
         results = []
         for mac, ts_map in by_mac_ts.items():
             # For each AP pair this MAC was seen on, check overlap
-            pair_stats: dict[tuple[str, str], list[int]] = defaultdict(list)
+            pair_stats: dict[tuple[str, str], list[tuple[int, int, int]]] = defaultdict(list)
             for ts, ap_rssi in ts_map.items():
                 for a, b in combinations(sorted(ap_rssi.keys()), 2):
-                    diff = abs(ap_rssi[a] - ap_rssi[b])
-                    pair_stats[(a, b)].append(diff)
+                    pair_stats[(a, b)].append((
+                        abs(ap_rssi[a] - ap_rssi[b]),
+                        ap_rssi[a],
+                        ap_rssi[b],
+                    ))
 
-            for pair, diffs in pair_stats.items():
-                overlaps = [d for d in diffs if d <= self._threshold]
+            for pair, samples in pair_stats.items():
+                overlaps = [(d, ra, rb) for d, ra, rb in samples if d <= self._threshold]
                 if overlaps:
                     results.append(OverlapResult(
                         mac=mac,
                         ap_pair=pair,
-                        rssi_diff=round(sum(overlaps) / len(overlaps), 1),
+                        rssi_diff=round(sum(d for d, _, _ in overlaps) / len(overlaps), 1),
                         overlap_count=len(overlaps),
-                        total_samples=len(diffs),
+                        total_samples=len(samples),
+                        avg_rssi_a=round(sum(ra for _, ra, _ in overlaps) / len(overlaps)),
+                        avg_rssi_b=round(sum(rb for _, _, rb in overlaps) / len(overlaps)),
                         ifname_a=ifname_by_mac_ap.get((mac, pair[0]), ""),
                         ifname_b=ifname_by_mac_ap.get((mac, pair[1]), ""),
                     ))

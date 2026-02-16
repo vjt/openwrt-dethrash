@@ -1,12 +1,12 @@
 import pytest
-from wifi_dethrash.recommender import Recommender, UCICommand
+from wifi_dethrash.recommender import Recommender, TxPowerRecommendation, UCICommand
 from wifi_dethrash.analyzers.thrashing import ThrashSequence
 from wifi_dethrash.analyzers.overlap import OverlapResult
 from wifi_dethrash.analyzers.weak import WeakAssociation
 
 
 class TestTxPowerRecommendation:
-    def test_recommends_power_reduction_for_thrashing_pair(self):
+    def test_recommends_for_thrashing_pair_with_overlap(self):
         thrash = [ThrashSequence(
             mac="aa:bb:cc:dd:ee:01",
             ap_pair=("golem", "pingu"),
@@ -20,22 +20,83 @@ class TestTxPowerRecommendation:
             rssi_diff=3.0,
             overlap_count=100,
             total_samples=120,
+            avg_rssi_a=-52,
+            avg_rssi_b=-55,
             ifname_a="phy1-ap0",
             ifname_b="phy1-ap0",
         )]
 
         rec = Recommender()
-        commands = rec.txpower_commands(thrash, overlap)
+        recs = rec.txpower_recommendations(thrash, overlap)
 
-        assert len(commands) == 2
-        assert all(c.command.startswith("uci set") for c in commands)
-        assert any("golem" in c.ssh_prefix for c in commands)
-        assert any("pingu" in c.ssh_prefix for c in commands)
-        # Should use radio1 since ifnames are phy1-ap0
-        assert all("wireless.radio1.txpower" in c.command for c in commands)
+        assert len(recs) == 1
+        r = recs[0]
+        assert r.ap_pair == ("golem", "pingu")
+        assert r.radio == "radio1"
+        assert r.total_thrash_connects == 50
+        assert r.total_thrash_episodes == 1
+        assert r.avg_rssi_diff == 3.0
+        # golem is louder (-52 > -55)
+        assert r.louder_ap == "golem"
+
+    def test_identifies_louder_ap(self):
+        """Should recommend reducing power on the AP with stronger signal."""
+        thrash = [ThrashSequence(
+            mac="aa:bb:cc:dd:ee:01",
+            ap_pair=("albert", "pingu"),
+            count=20,
+            first_time="2026-02-16T08:00:00Z",
+            last_time="2026-02-16T08:05:00Z",
+        )]
+        overlap = [OverlapResult(
+            mac="aa:bb:cc:dd:ee:01",
+            ap_pair=("albert", "pingu"),
+            rssi_diff=4.0,
+            overlap_count=50,
+            total_samples=60,
+            avg_rssi_a=-60,
+            avg_rssi_b=-54,  # pingu is louder
+            ifname_a="phy1-ap0",
+            ifname_b="phy1-ap0",
+        )]
+
+        rec = Recommender()
+        recs = rec.txpower_recommendations(thrash, overlap)
+
+        assert len(recs) == 1
+        assert recs[0].louder_ap == "pingu"
+
+    def test_aggregates_thrash_episodes(self):
+        """Multiple episodes for same pair should be aggregated."""
+        thrash = [
+            ThrashSequence(mac="aa:bb:cc:dd:ee:01", ap_pair=("golem", "pingu"),
+                           count=20, first_time="2026-02-16T08:00:00Z",
+                           last_time="2026-02-16T08:05:00Z"),
+            ThrashSequence(mac="aa:bb:cc:dd:ee:01", ap_pair=("golem", "pingu"),
+                           count=30, first_time="2026-02-16T09:00:00Z",
+                           last_time="2026-02-16T09:05:00Z"),
+        ]
+        overlap = [OverlapResult(
+            mac="aa:bb:cc:dd:ee:01",
+            ap_pair=("golem", "pingu"),
+            rssi_diff=3.0,
+            overlap_count=100,
+            total_samples=120,
+            avg_rssi_a=-52,
+            avg_rssi_b=-55,
+            ifname_a="phy1-ap0",
+            ifname_b="phy1-ap0",
+        )]
+
+        rec = Recommender()
+        recs = rec.txpower_recommendations(thrash, overlap)
+
+        assert len(recs) == 1
+        assert recs[0].total_thrash_connects == 50
+        assert recs[0].total_thrash_episodes == 2
 
     def test_uses_correct_radio_for_24ghz(self):
-        """Thrashing on 2.4 GHz should recommend radio0 power reduction."""
+        """Thrashing on 2.4 GHz should show radio0."""
         thrash = [ThrashSequence(
             mac="aa:bb:cc:dd:ee:01",
             ap_pair=("golem", "pingu"),
@@ -49,20 +110,48 @@ class TestTxPowerRecommendation:
             rssi_diff=4.0,
             overlap_count=50,
             total_samples=60,
+            avg_rssi_a=-52,
+            avg_rssi_b=-55,
             ifname_a="phy0-ap0",
             ifname_b="phy0-ap0",
         )]
 
         rec = Recommender()
-        commands = rec.txpower_commands(thrash, overlap)
+        recs = rec.txpower_recommendations(thrash, overlap)
 
-        assert len(commands) == 2
-        assert all("wireless.radio0.txpower" in c.command for c in commands)
+        assert len(recs) == 1
+        assert recs[0].radio == "radio0"
 
     def test_no_thrashing_no_recommendations(self):
         rec = Recommender()
-        commands = rec.txpower_commands([], [])
-        assert commands == []
+        recs = rec.txpower_recommendations([], [])
+        assert recs == []
+
+    def test_sorted_by_severity(self):
+        """Most thrashing pair should be first."""
+        thrash = [
+            ThrashSequence(mac="aa:bb:cc:dd:ee:01", ap_pair=("albert", "golem"),
+                           count=5, first_time="T1", last_time="T2"),
+            ThrashSequence(mac="aa:bb:cc:dd:ee:01", ap_pair=("golem", "pingu"),
+                           count=50, first_time="T1", last_time="T2"),
+        ]
+        overlap = [
+            OverlapResult(mac="aa:bb:cc:dd:ee:01", ap_pair=("albert", "golem"),
+                          rssi_diff=3.0, overlap_count=10, total_samples=20,
+                          avg_rssi_a=-55, avg_rssi_b=-58,
+                          ifname_a="phy1-ap0", ifname_b="phy1-ap0"),
+            OverlapResult(mac="aa:bb:cc:dd:ee:01", ap_pair=("golem", "pingu"),
+                          rssi_diff=2.0, overlap_count=80, total_samples=100,
+                          avg_rssi_a=-52, avg_rssi_b=-54,
+                          ifname_a="phy1-ap0", ifname_b="phy1-ap0"),
+        ]
+
+        rec = Recommender()
+        recs = rec.txpower_recommendations(thrash, overlap)
+
+        assert len(recs) == 2
+        assert recs[0].ap_pair == ("golem", "pingu")
+        assert recs[1].ap_pair == ("albert", "golem")
 
 
 class TestUsteerRecommendation:

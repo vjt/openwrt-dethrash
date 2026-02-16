@@ -22,6 +22,8 @@ class TestOverlapAnalysis:
         assert r.mac == "aa:bb:cc:dd:ee:01"
         assert set(r.ap_pair) == {"pingu", "golem"}
         assert r.rssi_diff == 3  # |(-55) - (-58)|
+        assert r.avg_rssi_a == -58  # golem (alphabetically first)
+        assert r.avg_rssi_b == -55  # pingu
         assert r.ifname_a == "phy1-ap0"
         assert r.ifname_b == "phy1-ap0"
 
@@ -59,3 +61,15 @@ class TestOverlapAnalysis:
         analyzer = OverlapAnalyzer(overlap_threshold=6)
         results = analyzer.analyze(readings)
         assert len(results) == 2
+
+    def test_normalizes_mac_to_lowercase(self):
+        """MACs from VM metrics (uppercase) should be normalized to lowercase."""
+        readings = [
+            _r("AA:BB:CC:DD:EE:01", "pingu", -55, 1000),
+            _r("AA:BB:CC:DD:EE:01", "golem", -58, 1000),
+        ]
+        analyzer = OverlapAnalyzer(overlap_threshold=6)
+        results = analyzer.analyze(readings)
+
+        assert len(results) == 1
+        assert results[0].mac == "aa:bb:cc:dd:ee:01"

@@ -29,7 +29,6 @@ wifi-dethrash --vm-url http://victoriametrics:8428 --vl-url http://victorialogs:
 | `--mac` | all | Filter to specific MAC address(es), repeatable |
 | `--overlap-threshold` | `6` | Max RSSI diff (dB) to count as overlap |
 | `--snr-threshold` | `15` | Min SNR (dB) for a healthy association |
-| `--target-power` | `14` | Recommended TX power (dBm) |
 | `--generate-dashboard` | off | Write Grafana dashboard JSON to file and exit |
 
 ### Examples
@@ -52,20 +51,23 @@ wifi-dethrash --vm-url http://vm:8428 --vl-url http://vl:9428 --generate-dashboa
   wifi-dethrash report
 ============================================================
 
---- Thrashing sequences ---
-  aa:bb:cc:dd:ee:01  golem <-> pingu  47 connects  (08:00:00Z to 08:12:00Z)
+--- Thrashing summary ---
+  aa:bb:cc:dd:ee:01  golem <-> pingu  345 connects in 30 episodes  (2026-02-09 to 2026-02-15)
 
---- RSSI overlap ---
-  aa:bb:cc:dd:ee:01  golem <-> pingu  avg diff 3.2 dB  (89/100 samples = 89%)
+--- RSSI overlap (significant) ---
+  aa:bb:cc:dd:ee:01  golem <-> pingu  avg diff 3.2 dB  (89/100 samples = 89%)  [golem: -52 dBm, pingu: -55 dBm]
 
 --- Weak associations ---
   aa:bb:cc:dd:ee:02 on mowgli  avg SNR 8 dB  (200 samples)
 
---- Recommended commands ---
-  ssh root@golem uci set wireless.radio1.txpower=14
-    # Reduce overlap with pingu on radio1 (avg 3.2 dB difference)
-  ssh root@pingu uci set wireless.radio1.txpower=14
-    # Reduce overlap with golem on radio1 (avg 3.2 dB difference)
+--- Recommendations ---
+  1. golem <-> pingu (radio1): CRITICAL
+     345 thrashing connects across 30 episodes
+     RSSI overlap: 3.2 dB avg diff (89% of samples)
+     golem: -52 dBm | pingu: -55 dBm
+     -> Consider reducing txpower on golem (radio1)
+
+  usteer:
   ssh root@<ap> uci set usteer.@usteer[0].min_connect_snr=15
     # Reject new associations below 15 dB SNR
   ssh root@<ap> uci set usteer.@usteer[0].min_snr=12

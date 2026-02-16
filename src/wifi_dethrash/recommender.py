@@ -1,9 +1,23 @@
+from collections import defaultdict
 from dataclasses import dataclass
 
 from wifi_dethrash.analyzers.thrashing import ThrashSequence
 from wifi_dethrash.analyzers.overlap import OverlapResult
 from wifi_dethrash.analyzers.weak import WeakAssociation
 from wifi_dethrash.utils import ifname_to_radio
+
+
+@dataclass(frozen=True)
+class TxPowerRecommendation:
+    ap_pair: tuple[str, str]
+    radio: str
+    total_thrash_connects: int
+    total_thrash_episodes: int
+    avg_rssi_diff: float
+    overlap_pct: int
+    avg_rssi_a: float              # avg RSSI for ap_pair[0]
+    avg_rssi_b: float              # avg RSSI for ap_pair[1]
+    louder_ap: str                 # which AP has the stronger signal
 
 
 @dataclass
@@ -18,46 +32,61 @@ class UCICommand:
 
 
 class Recommender:
-    def __init__(self, target_power: int = 14, min_snr_value: int = 15):
-        self._target_power = target_power
+    def __init__(self, min_snr_value: int = 15):
         self._min_snr_value = min_snr_value
 
-    def txpower_commands(
+    def txpower_recommendations(
         self,
         thrash: list[ThrashSequence],
         overlap: list[OverlapResult],
-    ) -> list[UCICommand]:
-        """Generate txpower reduction commands for thrashing AP pairs."""
+    ) -> list[TxPowerRecommendation]:
+        """Analyze thrashing+overlap to produce ranked power recommendations."""
         if not thrash:
             return []
 
-        # Find AP pairs that both thrash AND have RSSI overlap
-        overlap_pairs = {r.ap_pair for r in overlap}
-        thrash_pairs = {s.ap_pair for s in thrash}
-        confirmed = overlap_pairs & thrash_pairs
+        # Aggregate thrashing by ap_pair
+        thrash_by_pair: dict[tuple[str, str], list[ThrashSequence]] = defaultdict(list)
+        for s in thrash:
+            thrash_by_pair[s.ap_pair].append(s)
 
-        commands = []
-        affected_aps = set()
+        # Index overlap by ap_pair
+        overlap_by_pair: dict[tuple[str, str], list[OverlapResult]] = defaultdict(list)
+        for o in overlap:
+            overlap_by_pair[o.ap_pair].append(o)
+
+        # Only recommend for pairs with both thrashing AND overlap
+        confirmed = set(thrash_by_pair.keys()) & set(overlap_by_pair.keys())
+
+        recs = []
         for pair in confirmed:
-            overlap_r = next(
-                (r for r in overlap if r.ap_pair == pair), None
-            )
-            for i, ap in enumerate(pair):
-                if ap not in affected_aps:
-                    affected_aps.add(ap)
-                    other = pair[1 - i]
-                    diff = overlap_r.rssi_diff if overlap_r else "?"
-                    # Derive radio from the ifname seen in overlap data
-                    ifname = (overlap_r.ifname_a if i == 0 else overlap_r.ifname_b) if overlap_r else ""
-                    radio = ifname_to_radio(ifname) if ifname else "radio1"
-                    commands.append(UCICommand(
-                        ap=ap,
-                        ssh_prefix=f"ssh root@{ap}",
-                        command=f"uci set wireless.{radio}.txpower={self._target_power}",
-                        reason=f"Reduce overlap with {other} on {radio} (avg {diff} dB difference)",
-                    ))
+            episodes = thrash_by_pair[pair]
+            total_connects = sum(s.count for s in episodes)
 
-        return commands
+            overlaps = overlap_by_pair[pair]
+            # Use the overlap entry with most samples for this pair
+            best = max(overlaps, key=lambda o: o.overlap_count)
+
+            ifname = best.ifname_a or best.ifname_b or ""
+            radio = ifname_to_radio(ifname) if ifname else "unknown"
+
+            pct = round(best.overlap_count / best.total_samples * 100) if best.total_samples else 0
+
+            louder = pair[0] if best.avg_rssi_a > best.avg_rssi_b else pair[1]
+
+            recs.append(TxPowerRecommendation(
+                ap_pair=pair,
+                radio=radio,
+                total_thrash_connects=total_connects,
+                total_thrash_episodes=len(episodes),
+                avg_rssi_diff=best.rssi_diff,
+                overlap_pct=pct,
+                avg_rssi_a=best.avg_rssi_a,
+                avg_rssi_b=best.avg_rssi_b,
+                louder_ap=louder,
+            ))
+
+        recs.sort(key=lambda r: r.total_thrash_connects, reverse=True)
+        return recs
 
     def usteer_commands(
         self,

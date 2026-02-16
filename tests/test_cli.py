@@ -1,5 +1,7 @@
 import json
+import httpx
 import pytest
+import respx
 from click.testing import CliRunner
 from wifi_dethrash.cli import main
 
@@ -59,3 +61,65 @@ class TestCLI:
 
         assert result.exit_code == 0
         assert "wifi-dethrash report" in result.output
+
+    def test_vm_http_error_shows_friendly_message(self, respx_mock):
+        respx_mock.get("http://vm:8428/api/v1/label/instance/values").respond(
+            status_code=400, text="bad query"
+        )
+
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "--vm-url", "http://vm:8428",
+            "--vl-url", "http://vl:9428",
+        ])
+
+        assert result.exit_code != 0
+        assert "Error: VictoriaMetrics" in result.output
+        assert "HTTP 400" in result.output
+
+    def test_vl_http_error_shows_friendly_message(self, respx_mock):
+        respx_mock.get("http://vm:8428/api/v1/label/instance/values").respond(
+            json=VM_LABEL_RESP
+        )
+        respx_mock.get("http://vm:8428/api/v1/query_range").respond(
+            json=VM_RSSI_RESP
+        )
+        respx_mock.get("http://vl:9428/select/logsql/query").respond(
+            status_code=502, text="bad gateway"
+        )
+
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "--vm-url", "http://vm:8428",
+            "--vl-url", "http://vl:9428",
+        ])
+
+        assert result.exit_code != 0
+        assert "Error: VictoriaLogs" in result.output
+        assert "HTTP 502" in result.output
+
+    def test_connection_error_shows_friendly_message(self, respx_mock):
+        respx_mock.get("http://vm:8428/api/v1/label/instance/values").mock(
+            side_effect=httpx.ConnectError("Connection refused")
+        )
+
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "--vm-url", "http://vm:8428",
+            "--vl-url", "http://vl:9428",
+        ])
+
+        assert result.exit_code != 0
+        assert "Error:" in result.output
+        assert "connect" in result.output.lower()
+
+    def test_invalid_window_format(self):
+        runner = CliRunner()
+        result = runner.invoke(main, [
+            "--vm-url", "http://vm:8428",
+            "--vl-url", "http://vl:9428",
+            "--window", "banana",
+        ])
+
+        assert result.exit_code != 0
+        assert "Invalid window format" in result.output
