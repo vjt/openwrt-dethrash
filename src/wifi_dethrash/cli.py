@@ -53,7 +53,7 @@ def _handle_error(source: str, exc: Exception) -> None:
 
 @click.command()
 @click.option("--vm-url", required=True, help="VictoriaMetrics base URL")
-@click.option("--vl-url", required=True, help="VictoriaLogs base URL")
+@click.option("--vl-url", default=None, help="VictoriaLogs base URL (required for analysis)")
 @click.option("--window", default="24h", help="Time window to analyze (e.g. 1h, 24h, 7d)")
 @click.option("--host-label", default="instance", help="Metric label containing AP hostname")
 @click.option("--mac", multiple=True, help="Filter to specific MAC address(es)")
@@ -69,6 +69,9 @@ def main(vm_url, vl_url, window, host_label, mac, generate_dashboard,
     start = end - delta
 
     macs = list(mac) if mac else None
+
+    if not generate_dashboard and not vl_url:
+        raise click.UsageError("--vl-url is required for analysis mode")
 
     try:
         with VictoriaMetricsClient(vm_url, host_label=host_label) as vm:
