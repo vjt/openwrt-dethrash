@@ -46,6 +46,30 @@ class TestReport:
         assert "-52" in output
         assert "-55" in output
 
+    def test_txpower_recommendation_with_power_data(self):
+        recs = [TxPowerRecommendation(
+            ap_pair=("golem", "pingu"),
+            radio="radio1",
+            total_thrash_connects=50,
+            total_thrash_episodes=5,
+            avg_rssi_diff=3.0,
+            overlap_pct=34,
+            avg_rssi_a=-52,
+            avg_rssi_b=-55,
+            louder_ap="golem",
+            current_txpower_a=23,
+            current_txpower_b=20,
+            suggested_txpower=18,
+        )]
+        output = render_report(
+            thrash=[], overlap=[], weak=[],
+            txpower_recs=recs, usteer_commands=[],
+        )
+        assert "txpower 23 dBm" in output
+        assert "txpower 20 dBm" in output
+        assert "23 -> 18 dBm" in output
+        assert "uci set wireless.radio1.txpower=18" in output
+
     def test_includes_usteer_commands(self):
         commands = [UCICommand(
             ap="all",

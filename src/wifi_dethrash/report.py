@@ -82,12 +82,28 @@ def render_report(
             lines.append(
                 f"     RSSI overlap: {r.avg_rssi_diff} dB avg diff ({r.overlap_pct}% of samples)"
             )
-            lines.append(
-                f"     {r.ap_pair[0]}: {r.avg_rssi_a} dBm | {r.ap_pair[1]}: {r.avg_rssi_b} dBm"
-            )
-            lines.append(
-                f"     -> Consider reducing txpower on {r.louder_ap} ({r.radio})"
-            )
+
+            # Show RSSI with optional txpower info
+            a_info = f"{r.avg_rssi_a} dBm"
+            b_info = f"{r.avg_rssi_b} dBm"
+            if r.current_txpower_a is not None:
+                a_info += f" (txpower {r.current_txpower_a} dBm)"
+            if r.current_txpower_b is not None:
+                b_info += f" (txpower {r.current_txpower_b} dBm)"
+            lines.append(f"     {r.ap_pair[0]}: {a_info} | {r.ap_pair[1]}: {b_info}")
+
+            if r.suggested_txpower is not None:
+                louder_txp = r.current_txpower_a if r.louder_ap == r.ap_pair[0] else r.current_txpower_b
+                lines.append(
+                    f"     -> Reduce {r.louder_ap} {r.radio} txpower: {louder_txp} -> {r.suggested_txpower} dBm"
+                )
+                lines.append(
+                    f"        ssh root@{r.louder_ap} uci set wireless.{r.radio}.txpower={r.suggested_txpower}"
+                )
+            else:
+                lines.append(
+                    f"     -> Consider reducing txpower on {r.louder_ap} ({r.radio})"
+                )
             lines.append("")
 
     if usteer_commands:

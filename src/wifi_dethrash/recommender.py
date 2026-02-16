@@ -4,6 +4,7 @@ from dataclasses import dataclass
 from wifi_dethrash.analyzers.thrashing import ThrashSequence
 from wifi_dethrash.analyzers.overlap import OverlapResult
 from wifi_dethrash.analyzers.weak import WeakAssociation
+from wifi_dethrash.sources.vm import TxPowerReading
 from wifi_dethrash.utils import ifname_to_radio
 
 
@@ -18,6 +19,9 @@ class TxPowerRecommendation:
     avg_rssi_a: float              # avg RSSI for ap_pair[0]
     avg_rssi_b: float              # avg RSSI for ap_pair[1]
     louder_ap: str                 # which AP has the stronger signal
+    current_txpower_a: int | None = None
+    current_txpower_b: int | None = None
+    suggested_txpower: int | None = None  # for the louder AP
 
 
 @dataclass
@@ -32,17 +36,25 @@ class UCICommand:
 
 
 class Recommender:
-    def __init__(self, min_snr_value: int = 15):
+    def __init__(self, min_snr_value: int = 15, overlap_threshold: int = 6):
         self._min_snr_value = min_snr_value
+        self._overlap_threshold = overlap_threshold
 
     def txpower_recommendations(
         self,
         thrash: list[ThrashSequence],
         overlap: list[OverlapResult],
+        txpower: list[TxPowerReading] | None = None,
     ) -> list[TxPowerRecommendation]:
         """Analyze thrashing+overlap to produce ranked power recommendations."""
         if not thrash:
             return []
+
+        # Build txpower lookup: (ap, radio) -> TxPowerReading
+        txp_lookup: dict[tuple[str, str], TxPowerReading] = {}
+        if txpower:
+            for t in txpower:
+                txp_lookup[(t.ap, t.radio)] = t
 
         # Aggregate thrashing by ap_pair
         thrash_by_pair: dict[tuple[str, str], list[ThrashSequence]] = defaultdict(list)
@@ -73,6 +85,19 @@ class Recommender:
 
             louder = pair[0] if best.avg_rssi_a > best.avg_rssi_b else pair[1]
 
+            # Look up current txpower for each AP on this radio
+            txp_a_reading = txp_lookup.get((pair[0], radio))
+            txp_b_reading = txp_lookup.get((pair[1], radio))
+            current_txpower_a = txp_a_reading.txpower_dbm if txp_a_reading else None
+            current_txpower_b = txp_b_reading.txpower_dbm if txp_b_reading else None
+
+            # Compute suggested txpower for the louder AP
+            suggested = None
+            louder_txp = current_txpower_a if louder == pair[0] else current_txpower_b
+            if louder_txp is not None:
+                reduction = max(self._overlap_threshold - best.rssi_diff + 2, 2)
+                suggested = max(int(louder_txp - reduction), 5)
+
             recs.append(TxPowerRecommendation(
                 ap_pair=pair,
                 radio=radio,
@@ -83,6 +108,9 @@ class Recommender:
                 avg_rssi_a=best.avg_rssi_a,
                 avg_rssi_b=best.avg_rssi_b,
                 louder_ap=louder,
+                current_txpower_a=current_txpower_a,
+                current_txpower_b=current_txpower_b,
+                suggested_txpower=suggested,
             ))
 
         recs.sort(key=lambda r: r.total_thrash_connects, reverse=True)

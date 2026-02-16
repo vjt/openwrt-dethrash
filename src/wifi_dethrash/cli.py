@@ -93,6 +93,12 @@ def main(vm_url, vl_url, window, host_label, mac, generate_dashboard,
 
             click.echo("Fetching noise floor data ...")
             noise = vm.fetch_noise(start, end)
+
+            click.echo("Fetching txpower data ...")
+            try:
+                txpower = vm.fetch_txpower()
+            except Exception:
+                txpower = None
     except (httpx.HTTPStatusError, httpx.ConnectError, httpx.TimeoutException,
             ssl.SSLError) as exc:
         _handle_error(f"VictoriaMetrics ({vm_url})", exc)
@@ -112,8 +118,8 @@ def main(vm_url, vl_url, window, host_label, mac, generate_dashboard,
     overlap = OverlapAnalyzer(overlap_threshold).analyze(rssi)
     weak = WeakAssociationAnalyzer(snr_threshold).analyze(rssi, noise)
 
-    rec = Recommender(min_snr_value=snr_threshold)
-    txpower_recs = rec.txpower_recommendations(thrash, overlap)
+    rec = Recommender(min_snr_value=snr_threshold, overlap_threshold=overlap_threshold)
+    txpower_recs = rec.txpower_recommendations(thrash, overlap, txpower=txpower)
     usteer_commands = rec.usteer_commands(weak)
 
     click.echo("")

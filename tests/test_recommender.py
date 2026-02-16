@@ -3,6 +3,7 @@ from wifi_dethrash.recommender import Recommender, TxPowerRecommendation, UCICom
 from wifi_dethrash.analyzers.thrashing import ThrashSequence
 from wifi_dethrash.analyzers.overlap import OverlapResult
 from wifi_dethrash.analyzers.weak import WeakAssociation
+from wifi_dethrash.sources.vm import TxPowerReading
 
 
 class TestTxPowerRecommendation:
@@ -152,6 +153,102 @@ class TestTxPowerRecommendation:
         assert len(recs) == 2
         assert recs[0].ap_pair == ("golem", "pingu")
         assert recs[1].ap_pair == ("albert", "golem")
+
+    def test_includes_txpower_data_when_available(self):
+        """With txpower data, recommendations include current and suggested values."""
+        thrash = [ThrashSequence(
+            mac="aa:bb:cc:dd:ee:01",
+            ap_pair=("golem", "pingu"),
+            count=50,
+            first_time="2026-02-16T08:00:00Z",
+            last_time="2026-02-16T08:10:00Z",
+        )]
+        overlap = [OverlapResult(
+            mac="aa:bb:cc:dd:ee:01",
+            ap_pair=("golem", "pingu"),
+            rssi_diff=3.0,
+            overlap_count=100,
+            total_samples=120,
+            avg_rssi_a=-52,
+            avg_rssi_b=-55,
+            ifname_a="phy1-ap0",
+            ifname_b="phy1-ap0",
+        )]
+        txpower = [
+            TxPowerReading(ap="golem", radio="radio1", ifname="phy1-ap0",
+                           txpower_dbm=23, configured_txpower=23, channel=149, frequency_mhz=5745),
+            TxPowerReading(ap="pingu", radio="radio1", ifname="phy1-ap0",
+                           txpower_dbm=20, configured_txpower=20, channel=149, frequency_mhz=5745),
+        ]
+
+        rec = Recommender(overlap_threshold=6)
+        recs = rec.txpower_recommendations(thrash, overlap, txpower=txpower)
+
+        assert len(recs) == 1
+        r = recs[0]
+        assert r.louder_ap == "golem"
+        assert r.current_txpower_a == 23
+        assert r.current_txpower_b == 20
+        assert r.suggested_txpower is not None
+        # reduction = max(6 - 3 + 2, 2) = 5, so 23 - 5 = 18
+        assert r.suggested_txpower == 18
+
+    def test_suggested_txpower_clamped_to_minimum(self):
+        """Suggested txpower should not go below 5 dBm."""
+        thrash = [ThrashSequence(
+            mac="aa:bb:cc:dd:ee:01",
+            ap_pair=("golem", "pingu"),
+            count=50,
+            first_time="T1",
+            last_time="T2",
+        )]
+        overlap = [OverlapResult(
+            mac="aa:bb:cc:dd:ee:01",
+            ap_pair=("golem", "pingu"),
+            rssi_diff=0.5,
+            overlap_count=100,
+            total_samples=120,
+            avg_rssi_a=-52,
+            avg_rssi_b=-55,
+            ifname_a="phy1-ap0",
+            ifname_b="phy1-ap0",
+        )]
+        txpower = [
+            TxPowerReading(ap="golem", radio="radio1", ifname="phy1-ap0",
+                           txpower_dbm=8, configured_txpower=8, channel=149, frequency_mhz=5745),
+        ]
+
+        rec = Recommender(overlap_threshold=6)
+        recs = rec.txpower_recommendations(thrash, overlap, txpower=txpower)
+
+        assert recs[0].suggested_txpower == 5
+
+    def test_no_txpower_data_gives_none(self):
+        """Without txpower data, fields should be None."""
+        thrash = [ThrashSequence(
+            mac="aa:bb:cc:dd:ee:01",
+            ap_pair=("golem", "pingu"),
+            count=50,
+            first_time="T1",
+            last_time="T2",
+        )]
+        overlap = [OverlapResult(
+            mac="aa:bb:cc:dd:ee:01",
+            ap_pair=("golem", "pingu"),
+            rssi_diff=3.0,
+            overlap_count=100,
+            total_samples=120,
+            avg_rssi_a=-52,
+            avg_rssi_b=-55,
+            ifname_a="phy1-ap0",
+            ifname_b="phy1-ap0",
+        )]
+
+        rec = Recommender()
+        recs = rec.txpower_recommendations(thrash, overlap)
+
+        assert recs[0].current_txpower_a is None
+        assert recs[0].suggested_txpower is None
 
 
 class TestUsteerRecommendation:
