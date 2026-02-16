@@ -3,6 +3,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 
 from wifi_dethrash.sources.vm import RSSIReading, NoiseReading
+from wifi_dethrash.utils import ifname_to_radio
 
 
 @dataclass(frozen=True)
@@ -11,6 +12,7 @@ class WeakAssociation:
     ap: str
     avg_snr: float
     sample_count: int
+    ifname: str = ""
 
 
 class WeakAssociationAnalyzer:
@@ -22,21 +24,26 @@ class WeakAssociationAnalyzer:
         rssi: list[RSSIReading],
         noise: list[NoiseReading],
     ) -> list[WeakAssociation]:
-        # Build noise lookup: ap -> sorted [(timestamp, noise_dbm)]
-        noise_by_ap: dict[str, list[tuple[int, int]]] = defaultdict(list)
+        # Build noise lookup keyed by (ap, radio) for correct band matching
+        noise_by_ap_radio: dict[tuple[str, str], list[tuple[int, int]]] = defaultdict(list)
         for n in noise:
-            noise_by_ap[n.ap].append((n.timestamp, n.noise_dbm))
+            noise_by_ap_radio[(n.ap, n.radio)].append((n.timestamp, n.noise_dbm))
 
-        for ap in noise_by_ap:
-            noise_by_ap[ap].sort()
+        for key in noise_by_ap_radio:
+            noise_by_ap_radio[key].sort()
 
-        # Compute SNR for each RSSI reading
+        # Compute SNR for each RSSI reading, joining on (ap, radio)
         snr_by_mac_ap: dict[tuple[str, str], list[float]] = defaultdict(list)
+        ifname_by_mac_ap: dict[tuple[str, str], str] = {}
         for r in rssi:
-            noise_val = self._nearest_noise(noise_by_ap.get(r.ap, []), r.timestamp)
+            radio = ifname_to_radio(r.ifname)
+            noise_val = self._nearest_noise(
+                noise_by_ap_radio.get((r.ap, radio), []), r.timestamp
+            )
             if noise_val is not None:
                 snr = r.rssi - noise_val
                 snr_by_mac_ap[(r.mac, r.ap)].append(snr)
+                ifname_by_mac_ap[(r.mac, r.ap)] = r.ifname
 
         results = []
         for (mac, ap), snrs in snr_by_mac_ap.items():
@@ -47,6 +54,7 @@ class WeakAssociationAnalyzer:
                     ap=ap,
                     avg_snr=round(avg),
                     sample_count=len(snrs),
+                    ifname=ifname_by_mac_ap.get((mac, ap), ""),
                 ))
 
         results.sort(key=lambda w: w.avg_snr)

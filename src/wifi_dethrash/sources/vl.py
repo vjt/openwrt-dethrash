@@ -6,7 +6,7 @@ from datetime import datetime
 import httpx
 
 _MSG_RE = re.compile(
-    r"(?:[\w-]+): AP-STA-(CONNECTED|DISCONNECTED) "
+    r"([\w-]+): AP-STA-(CONNECTED|DISCONNECTED) "
     r"([0-9a-fA-F:]{17})"
     r"(?: auth_alg=(\w+))?"
 )
@@ -19,6 +19,7 @@ class HostapdEvent:
     ap: str
     time: str        # ISO 8601
     auth_alg: str | None = None  # "ft", "open", or None (disconnects)
+    ifname: str | None = None    # e.g. "phy1-ap0"
 
 
 class VictoriaLogsClient:
@@ -26,6 +27,15 @@ class VictoriaLogsClient:
         self._base_url = base_url.rstrip("/")
         self._hostname_field = hostname_field
         self._client = httpx.Client(timeout=30)
+
+    def close(self) -> None:
+        self._client.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        self.close()
 
     def fetch_events(
         self,
@@ -61,11 +71,12 @@ class VictoriaLogsClient:
             if not m:
                 continue
             events.append(HostapdEvent(
-                event=m.group(1).lower(),
-                mac=m.group(2).lower(),
+                event=m.group(2).lower(),
+                mac=m.group(3).lower(),
                 ap=row.get(self._hostname_field, ""),
                 time=row["_time"],
-                auth_alg=m.group(3),
+                auth_alg=m.group(4),
+                ifname=m.group(1),
             ))
 
         events.sort(key=lambda e: e.time)

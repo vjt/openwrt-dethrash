@@ -28,11 +28,22 @@ class TestThrashingDetection:
         assert set(s.ap_pair) == {"pingu", "golem"}
         assert s.count == 4
 
-    def test_ignores_normal_roaming(self):
-        """Roaming once is not thrashing."""
+    def test_too_few_connects_not_thrashing(self):
+        """Two connects between the same pair is below min_count=3."""
+        events = [
+            _connect("aa:bb:cc:dd:ee:01", "pingu", "2026-02-16T08:00:00Z"),
+            _connect("aa:bb:cc:dd:ee:01", "golem", "2026-02-16T08:00:03Z"),
+        ]
+        detector = ThrashingDetector(max_gap=60)
+        sequences = detector.detect(events)
+        assert sequences == []
+
+    def test_large_gap_not_thrashing(self):
+        """Three connects with gaps exceeding max_gap are not thrashing."""
         events = [
             _connect("aa:bb:cc:dd:ee:01", "pingu", "2026-02-16T08:00:00Z"),
             _connect("aa:bb:cc:dd:ee:01", "golem", "2026-02-16T08:05:00Z"),
+            _connect("aa:bb:cc:dd:ee:01", "pingu", "2026-02-16T08:10:00Z"),
         ]
         detector = ThrashingDetector(max_gap=60)
         sequences = detector.detect(events)

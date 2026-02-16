@@ -105,7 +105,7 @@ class TestFetchRSSI:
         assert r.rssi == -55
         assert r.timestamp == 1700000000
 
-    def test_mac_filter(self, respx_mock):
+    def test_mac_filter_includes_mac_in_query(self, respx_mock):
         respx_mock.get("http://vm:8428/api/v1/query_range").respond(
             json=QUERY_RANGE_RESPONSE
         )
@@ -115,8 +115,11 @@ class TestFetchRSSI:
         end = datetime(2023, 11, 14, 22, 14, 20, tzinfo=timezone.utc)
         readings = client.fetch_rssi(start, end, macs=["de:ad:be:ef:00:01"])
 
-        # All readings match, so same count — but the query should have a label filter
         assert len(readings) == 4
+        # Verify the query parameter included the MAC filter
+        request = respx_mock.calls[0].request
+        query_param = dict(request.url.params)["query"]
+        assert 'de:ad:be:ef:00:01' in query_param
 
 
 class TestFetchNoise:

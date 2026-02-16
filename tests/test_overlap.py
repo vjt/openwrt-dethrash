@@ -3,8 +3,8 @@ from wifi_dethrash.analyzers.overlap import OverlapAnalyzer, OverlapResult
 from wifi_dethrash.sources.vm import RSSIReading
 
 
-def _r(mac, ap, rssi, ts):
-    return RSSIReading(mac=mac, ap=ap, ifname="phy1-ap0", rssi=rssi, timestamp=ts)
+def _r(mac, ap, rssi, ts, ifname="phy1-ap0"):
+    return RSSIReading(mac=mac, ap=ap, ifname=ifname, rssi=rssi, timestamp=ts)
 
 
 class TestOverlapAnalysis:
@@ -22,6 +22,8 @@ class TestOverlapAnalysis:
         assert r.mac == "aa:bb:cc:dd:ee:01"
         assert set(r.ap_pair) == {"pingu", "golem"}
         assert r.rssi_diff == 3  # |(-55) - (-58)|
+        assert r.ifname_a == "phy1-ap0"
+        assert r.ifname_b == "phy1-ap0"
 
     def test_no_overlap_when_difference_large(self):
         """20 dB difference = no overlap."""

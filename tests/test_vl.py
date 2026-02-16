@@ -6,7 +6,7 @@ from wifi_dethrash.sources.vl import VictoriaLogsClient, HostapdEvent
 JSONL_RESPONSE = (
     '{"_time":"2026-02-16T07:49:56Z","_msg":"phy1-ap0: AP-STA-CONNECTED de:ad:be:ef:00:01 auth_alg=ft","tags.hostname":"pingu"}\n'
     '{"_time":"2026-02-16T07:52:47Z","_msg":"phy1-ap0: AP-STA-DISCONNECTED de:ad:be:ef:00:01","tags.hostname":"pingu"}\n'
-    '{"_time":"2026-02-16T07:52:48Z","_msg":"phy1-ap0: AP-STA-CONNECTED de:ad:be:ef:00:01 auth_alg=open","tags.hostname":"golem"}\n'
+    '{"_time":"2026-02-16T07:52:48Z","_msg":"phy0-ap0: AP-STA-CONNECTED de:ad:be:ef:00:01 auth_alg=open","tags.hostname":"golem"}\n'
 )
 
 
@@ -28,6 +28,7 @@ class TestFetchEvents:
         assert e.mac == "de:ad:be:ef:00:01"
         assert e.ap == "pingu"
         assert e.auth_alg == "ft"
+        assert e.ifname == "phy1-ap0"
         assert e.time == "2026-02-16T07:49:56Z"
 
         e = events[1]
@@ -35,13 +36,15 @@ class TestFetchEvents:
         assert e.mac == "de:ad:be:ef:00:01"
         assert e.ap == "pingu"
         assert e.auth_alg is None
+        assert e.ifname == "phy1-ap0"
 
         e = events[2]
         assert e.event == "connected"
         assert e.auth_alg == "open"
         assert e.ap == "golem"
+        assert e.ifname == "phy0-ap0"
 
-    def test_mac_filter(self, respx_mock):
+    def test_mac_filter_includes_mac_in_query(self, respx_mock):
         respx_mock.get("http://vl:9428/select/logsql/query").respond(
             text=JSONL_RESPONSE,
         )
@@ -51,8 +54,11 @@ class TestFetchEvents:
         end = datetime(2026, 2, 16, 8, 0, tzinfo=timezone.utc)
         events = client.fetch_events(start, end, macs=["de:ad:be:ef:00:01"])
 
-        # The query should include a MAC filter — all 3 events match this MAC
         assert len(events) == 3
+        # Verify the query parameter included the MAC filter
+        request = respx_mock.calls[0].request
+        query_param = dict(request.url.params)["query"]
+        assert 'de:ad:be:ef:00:01' in query_param
 
     def test_custom_hostname_field(self, respx_mock):
         resp_text = '{"_time":"2026-02-16T08:00:00Z","_msg":"phy1-ap0: AP-STA-CONNECTED aa:bb:cc:dd:ee:ff auth_alg=open","host":"router1"}\n'

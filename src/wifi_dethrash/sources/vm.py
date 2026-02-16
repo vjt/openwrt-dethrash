@@ -34,6 +34,15 @@ class VictoriaMetricsClient:
         self._host_label = host_label
         self._client = httpx.Client(timeout=30)
 
+    def close(self) -> None:
+        self._client.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        self.close()
+
     def _hostname_from_label(self, label_value: str) -> str:
         """Extract hostname from label value. 'mowgli:9100' -> 'mowgli'."""
         return label_value.split(":")[0] if ":" in label_value else label_value

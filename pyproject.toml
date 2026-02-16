@@ -15,7 +15,6 @@ dependencies = [
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0",
-    "pytest-asyncio>=0.23",
     "respx>=0.21",
 ]
 
@@ -26,4 +25,3 @@ wifi-dethrash = "wifi_dethrash.cli:main"
 where = ["src"]
 
 [tool.pytest.ini_options]
-asyncio_mode = "auto"

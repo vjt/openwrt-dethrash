@@ -20,16 +20,44 @@ class TestTxPowerRecommendation:
             rssi_diff=3.0,
             overlap_count=100,
             total_samples=120,
+            ifname_a="phy1-ap0",
+            ifname_b="phy1-ap0",
         )]
 
         rec = Recommender()
         commands = rec.txpower_commands(thrash, overlap)
 
-        # Should recommend reducing power on both APs in the pair
-        assert len(commands) >= 2
+        assert len(commands) == 2
         assert all(c.command.startswith("uci set") for c in commands)
         assert any("golem" in c.ssh_prefix for c in commands)
         assert any("pingu" in c.ssh_prefix for c in commands)
+        # Should use radio1 since ifnames are phy1-ap0
+        assert all("wireless.radio1.txpower" in c.command for c in commands)
+
+    def test_uses_correct_radio_for_24ghz(self):
+        """Thrashing on 2.4 GHz should recommend radio0 power reduction."""
+        thrash = [ThrashSequence(
+            mac="aa:bb:cc:dd:ee:01",
+            ap_pair=("golem", "pingu"),
+            count=20,
+            first_time="2026-02-16T08:00:00Z",
+            last_time="2026-02-16T08:05:00Z",
+        )]
+        overlap = [OverlapResult(
+            mac="aa:bb:cc:dd:ee:01",
+            ap_pair=("golem", "pingu"),
+            rssi_diff=4.0,
+            overlap_count=50,
+            total_samples=60,
+            ifname_a="phy0-ap0",
+            ifname_b="phy0-ap0",
+        )]
+
+        rec = Recommender()
+        commands = rec.txpower_commands(thrash, overlap)
+
+        assert len(commands) == 2
+        assert all("wireless.radio0.txpower" in c.command for c in commands)
 
     def test_no_thrashing_no_recommendations(self):
         rec = Recommender()
@@ -60,6 +88,6 @@ class TestUCICommand:
             ap="pingu",
             ssh_prefix="ssh root@pingu",
             command="uci set wireless.radio1.txpower=14",
-            reason="Reduce overlap with golem (avg 3 dB difference)",
+            reason="Reduce overlap with golem on radio1 (avg 3 dB difference)",
         )
         assert str(cmd) == "ssh root@pingu uci set wireless.radio1.txpower=14"

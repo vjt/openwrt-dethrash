@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from wifi_dethrash.analyzers.thrashing import ThrashSequence
 from wifi_dethrash.analyzers.overlap import OverlapResult
 from wifi_dethrash.analyzers.weak import WeakAssociation
+from wifi_dethrash.utils import ifname_to_radio
 
 
 @dataclass
@@ -38,19 +39,22 @@ class Recommender:
         commands = []
         affected_aps = set()
         for pair in confirmed:
-            for ap in pair:
+            overlap_r = next(
+                (r for r in overlap if r.ap_pair == pair), None
+            )
+            for i, ap in enumerate(pair):
                 if ap not in affected_aps:
                     affected_aps.add(ap)
-                    other = pair[1] if pair[0] == ap else pair[0]
-                    overlap_r = next(
-                        (r for r in overlap if r.ap_pair == pair), None
-                    )
+                    other = pair[1 - i]
                     diff = overlap_r.rssi_diff if overlap_r else "?"
+                    # Derive radio from the ifname seen in overlap data
+                    ifname = (overlap_r.ifname_a if i == 0 else overlap_r.ifname_b) if overlap_r else ""
+                    radio = ifname_to_radio(ifname) if ifname else "radio1"
                     commands.append(UCICommand(
                         ap=ap,
                         ssh_prefix=f"ssh root@{ap}",
-                        command=f"uci set wireless.radio1.txpower={self._target_power}",
-                        reason=f"Reduce overlap with {other} (avg {diff} dB difference)",
+                        command=f"uci set wireless.{radio}.txpower={self._target_power}",
+                        reason=f"Reduce overlap with {other} on {radio} (avg {diff} dB difference)",
                     ))
 
         return commands
