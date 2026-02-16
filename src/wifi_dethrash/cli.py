@@ -2,6 +2,9 @@ import re
 from datetime import datetime, timedelta, timezone
 
 import click
+import truststore
+
+truststore.inject_into_ssl()
 
 from wifi_dethrash.sources.vm import VictoriaMetricsClient
 from wifi_dethrash.sources.vl import VictoriaLogsClient
