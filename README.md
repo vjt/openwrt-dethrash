@@ -14,7 +14,7 @@ pip install -e ".[dev]"
 ## Usage
 
 ```bash
-dethrash --vm-url http://victoriametrics:8428 --vl-url http://victorialogs:9428
+wifi-dethrash --vm-url http://victoriametrics:8428 --vl-url http://victorialogs:9428
 ```
 
-See `dethrash --help` for all options.
+See `wifi-dethrash --help` for all options.

@@ -20,7 +20,7 @@ dev = [
 ]
 
 [project.scripts]
-dethrash = "dethrash.cli:main"
+wifi-dethrash = "wifi_dethrash.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

@@ -1,6 +1,6 @@
 import pytest
 from datetime import datetime, timezone
-from dethrash.sources.vm import VictoriaMetricsClient, APInfo, RSSIReading
+from wifi_dethrash.sources.vm import VictoriaMetricsClient, APInfo, RSSIReading
 
 
 # --- Fixtures ---

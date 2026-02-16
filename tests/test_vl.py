@@ -1,6 +1,6 @@
 import pytest
 from datetime import datetime, timezone
-from dethrash.sources.vl import VictoriaLogsClient, HostapdEvent
+from wifi_dethrash.sources.vl import VictoriaLogsClient, HostapdEvent
 
 
 JSONL_RESPONSE = (
