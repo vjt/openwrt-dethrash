@@ -72,3 +72,24 @@ class TestDashboard:
         expr = parsed["panels"][0]["targets"][0]["expr"]
         assert "mowgli:9100" in expr
         assert "pingu:9100" in expr
+
+    def test_has_txpower_panel(self):
+        aps = [APInfo(hostname="mowgli", instance="mowgli:9100")]
+        parsed = json.loads(generate_dashboard(aps))
+
+        titles = [p["title"] for p in parsed["panels"]]
+        assert "TX Power by Radio" in titles
+
+    def test_has_80211_status_panel(self):
+        aps = [APInfo(hostname="mowgli", instance="mowgli:9100")]
+        parsed = json.loads(generate_dashboard(aps))
+
+        titles = [p["title"] for p in parsed["panels"]]
+        assert "802.11r/k/v Status" in titles
+
+    def test_has_usteer_panel(self):
+        aps = [APInfo(hostname="mowgli", instance="mowgli:9100")]
+        parsed = json.loads(generate_dashboard(aps))
+
+        titles = [p["title"] for p in parsed["panels"]]
+        assert "Usteer Thresholds" in titles

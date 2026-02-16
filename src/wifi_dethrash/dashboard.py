@@ -69,6 +69,104 @@ def generate_dashboard(aps: list[APInfo]) -> str:
             ],
             "options": {},
         },
+        {
+            "id": 4,
+            "title": "TX Power by Radio",
+            "type": "table",
+            "gridPos": {"h": 6, "w": 12, "x": 0, "y": 24},
+            "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+            "targets": [
+                {
+                    "refId": "A",
+                    "expr": f'wifi_radio_txpower_dbm{{instance=~"{instance_re}"}}',
+                    "instant": True,
+                    "format": "table",
+                },
+                {
+                    "refId": "B",
+                    "expr": f'wifi_radio_configured_txpower{{instance=~"{instance_re}"}}',
+                    "instant": True,
+                    "format": "table",
+                },
+            ],
+            "fieldConfig": {
+                "defaults": {"unit": "dBm"},
+                "overrides": [],
+            },
+            "options": {},
+            "transformations": [
+                {
+                    "id": "merge",
+                    "options": {},
+                },
+            ],
+        },
+        {
+            "id": 5,
+            "title": "802.11r/k/v Status",
+            "type": "table",
+            "gridPos": {"h": 6, "w": 12, "x": 12, "y": 24},
+            "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+            "targets": [
+                {
+                    "refId": "A",
+                    "expr": f'wifi_iface_ieee80211r_enabled{{instance=~"{instance_re}"}}',
+                    "instant": True,
+                    "format": "table",
+                },
+                {
+                    "refId": "B",
+                    "expr": f'wifi_iface_ieee80211k_enabled{{instance=~"{instance_re}"}}',
+                    "instant": True,
+                    "format": "table",
+                },
+                {
+                    "refId": "C",
+                    "expr": f'wifi_iface_ieee80211v_enabled{{instance=~"{instance_re}"}}',
+                    "instant": True,
+                    "format": "table",
+                },
+            ],
+            "fieldConfig": {
+                "defaults": {},
+                "overrides": [
+                    {
+                        "matcher": {"id": "byRegexp", "options": "Value.*"},
+                        "properties": [
+                            {"id": "mappings", "value": [
+                                {"type": "value", "options": {"0": {"text": "Off"}, "1": {"text": "On"}}},
+                            ]},
+                        ],
+                    },
+                ],
+            },
+            "options": {},
+            "transformations": [
+                {
+                    "id": "merge",
+                    "options": {},
+                },
+            ],
+        },
+        {
+            "id": 6,
+            "title": "Usteer Thresholds",
+            "type": "stat",
+            "gridPos": {"h": 4, "w": 24, "x": 0, "y": 30},
+            "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+            "targets": [
+                {"refId": "A", "expr": "wifi_usteer_min_connect_snr", "legendFormat": "min_connect_snr"},
+                {"refId": "B", "expr": "wifi_usteer_min_snr", "legendFormat": "min_snr"},
+                {"refId": "C", "expr": "wifi_usteer_roam_scan_snr", "legendFormat": "roam_scan_snr"},
+                {"refId": "D", "expr": "wifi_usteer_roam_trigger_snr", "legendFormat": "roam_trigger_snr"},
+                {"refId": "E", "expr": "wifi_usteer_signal_diff_threshold", "legendFormat": "signal_diff"},
+            ],
+            "fieldConfig": {
+                "defaults": {"unit": "dB"},
+                "overrides": [],
+            },
+            "options": {"textMode": "value_and_name", "colorMode": "background"},
+        },
     ]
 
     dashboard = {
@@ -95,6 +193,8 @@ def generate_dashboard(aps: list[APInfo]) -> str:
             {"type": "datasource", "id": "prometheus", "name": "Prometheus", "version": "1.0.0"},
             {"type": "panel", "id": "timeseries", "name": "Time series", "version": ""},
             {"type": "panel", "id": "logs", "name": "Logs", "version": ""},
+            {"type": "panel", "id": "table", "name": "Table", "version": ""},
+            {"type": "panel", "id": "stat", "name": "Stat", "version": ""},
         ],
         "id": None,
         "uid": None,
