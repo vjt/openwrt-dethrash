@@ -64,8 +64,9 @@ wifi-dethrash --vm-url http://vm:8428 --vl-url http://vl:9428 --generate-dashboa
   1. golem <-> pingu (radio1): CRITICAL
      345 thrashing connects across 30 episodes
      RSSI overlap: 3.2 dB avg diff (89% of samples)
-     golem: -52 dBm | pingu: -55 dBm
-     -> Consider reducing txpower on golem (radio1)
+     golem: -52 dBm (txpower 23 dBm) | pingu: -55 dBm (txpower 20 dBm)
+     -> Reduce golem radio1 txpower: 23 -> 18 dBm
+        ssh root@golem uci set wireless.radio1.txpower=18
 
   usteer:
   ssh root@<ap> uci set usteer.@usteer[0].min_connect_snr=15
@@ -80,11 +81,52 @@ wifi-dethrash --vm-url http://vm:8428 --vl-url http://vl:9428 --generate-dashboa
 
 - `wifi_station_signal_dbm` — per-station RSSI (labels: `mac`, `ifname`, `instance`)
 - `wifi_network_noise_dbm` — noise floor per radio (labels: `device`, `channel`, `frequency`)
+- `wifi_radio_txpower_dbm` — effective txpower per radio (labels: `device`, `ifname`, `ssid`)
+- `wifi_radio_configured_txpower` — UCI-configured txpower per radio (label: `device`)
 
 **VictoriaLogs** — hostapd syslog events shipped via Telegraf:
 
 - `AP-STA-CONNECTED <mac> auth_alg=ft|open` — connect events
 - `AP-STA-DISCONNECTED <mac>` — disconnect events
+
+## Collector deployment
+
+The `openwrt/` directory contains a custom Prometheus collector for OpenWrt APs
+that exports radio metrics, 802.11r/k/v config, and usteer thresholds.
+
+### Manual deploy
+
+```bash
+scp openwrt/usr/lib/lua/prometheus-collectors/wifi_dethrash.lua \
+  root@<ap>:/usr/lib/lua/prometheus-collectors/
+ssh root@<ap> /etc/init.d/prometheus-node-exporter-lua restart
+```
+
+### Package build (.ipk)
+
+Build a standard `.ipk` package without the OpenWrt SDK:
+
+```bash
+openwrt/build-ipk.sh              # outputs to openwrt/dist/
+openwrt/build-ipk.sh /path/to/feed  # outputs to custom directory
+```
+
+This creates:
+- `wifi-dethrash-collector_0.1.0-1_all.ipk`
+- `Packages` and `Packages.gz` index files
+
+### Hosting a package feed
+
+Serve the output directory over HTTP (nginx, caddy, python -m http.server, etc.).
+
+On each AP, add the feed:
+
+```bash
+echo "src/gz wifi-dethrash http://<your-server>/openwrt-feed" \
+  >> /etc/opkg/customfeeds.conf
+opkg update
+opkg install wifi-dethrash-collector
+```
 
 ## Development
 
