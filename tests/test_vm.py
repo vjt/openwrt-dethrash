@@ -15,7 +15,7 @@ QUERY_RANGE_RESPONSE = {
         "result": [
             {
                 "metric": {
-                    "mac": "de:ad:be:ef:99:99",
+                    "mac": "de:ad:be:ef:00:01",
                     "ifname": "phy1-ap0",
                     "instance": "mowgli:9100",
                 },
@@ -26,7 +26,7 @@ QUERY_RANGE_RESPONSE = {
             },
             {
                 "metric": {
-                    "mac": "de:ad:be:ef:99:99",
+                    "mac": "de:ad:be:ef:00:01",
                     "ifname": "phy1-ap0",
                     "instance": "pingu:9100",
                 },
@@ -100,7 +100,7 @@ class TestFetchRSSI:
 
         assert len(readings) == 4  # 2 series x 2 values each
         r = readings[0]
-        assert r.mac == "de:ad:be:ef:99:99"
+        assert r.mac == "de:ad:be:ef:00:01"
         assert r.ap == "mowgli"
         assert r.rssi == -55
         assert r.timestamp == 1700000000
@@ -113,7 +113,7 @@ class TestFetchRSSI:
         client = VictoriaMetricsClient("http://vm:8428")
         start = datetime(2023, 11, 14, 22, 13, 20, tzinfo=timezone.utc)
         end = datetime(2023, 11, 14, 22, 14, 20, tzinfo=timezone.utc)
-        readings = client.fetch_rssi(start, end, macs=["de:ad:be:ef:99:99"])
+        readings = client.fetch_rssi(start, end, macs=["de:ad:be:ef:00:01"])
 
         # All readings match, so same count — but the query should have a label filter
         assert len(readings) == 4

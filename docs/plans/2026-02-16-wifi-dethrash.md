@@ -33,8 +33,8 @@ VictoriaMetrics adds an `instance` label (e.g. `mowgli:9100`) to all metrics scr
 
 | Field | Example | What it tells us |
 |-------|---------|-----------------|
-| `_msg` | `phy1-ap0: AP-STA-CONNECTED de:ad:be:ef:99:99 auth_alg=ft` | Connect event, with auth type |
-| `_msg` | `phy1-ap0: AP-STA-DISCONNECTED de:ad:be:ef:99:99` | Disconnect event |
+| `_msg` | `phy1-ap0: AP-STA-CONNECTED de:ad:be:ef:00:01 auth_alg=ft` | Connect event, with auth type |
+| `_msg` | `phy1-ap0: AP-STA-DISCONNECTED de:ad:be:ef:00:01` | Disconnect event |
 | `tags.hostname` | `pingu` | AP hostname |
 | `_time` | `2026-02-16T07:49:56Z` | Event timestamp |
 
@@ -235,7 +235,7 @@ QUERY_RANGE_RESPONSE = {
         "result": [
             {
                 "metric": {
-                    "mac": "de:ad:be:ef:99:99",
+                    "mac": "de:ad:be:ef:00:01",
                     "ifname": "phy1-ap0",
                     "instance": "mowgli:9100",
                 },
@@ -246,7 +246,7 @@ QUERY_RANGE_RESPONSE = {
             },
             {
                 "metric": {
-                    "mac": "de:ad:be:ef:99:99",
+                    "mac": "de:ad:be:ef:00:01",
                     "ifname": "phy1-ap0",
                     "instance": "pingu:9100",
                 },
@@ -320,7 +320,7 @@ class TestFetchRSSI:
 
         assert len(readings) == 4  # 2 series x 2 values each
         r = readings[0]
-        assert r.mac == "de:ad:be:ef:99:99"
+        assert r.mac == "de:ad:be:ef:00:01"
         assert r.ap == "mowgli"
         assert r.rssi == -55
         assert r.timestamp == 1700000000
@@ -333,7 +333,7 @@ class TestFetchRSSI:
         client = VictoriaMetricsClient("http://vm:8428")
         start = datetime(2023, 11, 14, 22, 13, 20, tzinfo=timezone.utc)
         end = datetime(2023, 11, 14, 22, 14, 20, tzinfo=timezone.utc)
-        readings = client.fetch_rssi(start, end, macs=["de:ad:be:ef:99:99"])
+        readings = client.fetch_rssi(start, end, macs=["de:ad:be:ef:00:01"])
 
         # All readings match, so same count — but the query should have a label filter
         assert len(readings) == 4
@@ -543,9 +543,9 @@ from dethrash.sources.vl import VictoriaLogsClient, HostapdEvent
 
 
 JSONL_RESPONSE = (
-    '{"_time":"2026-02-16T07:49:56Z","_msg":"phy1-ap0: AP-STA-CONNECTED de:ad:be:ef:99:99 auth_alg=ft","tags.hostname":"pingu"}\n'
-    '{"_time":"2026-02-16T07:52:47Z","_msg":"phy1-ap0: AP-STA-DISCONNECTED de:ad:be:ef:99:99","tags.hostname":"pingu"}\n'
-    '{"_time":"2026-02-16T07:52:48Z","_msg":"phy1-ap0: AP-STA-CONNECTED de:ad:be:ef:99:99 auth_alg=open","tags.hostname":"golem"}\n'
+    '{"_time":"2026-02-16T07:49:56Z","_msg":"phy1-ap0: AP-STA-CONNECTED de:ad:be:ef:00:01 auth_alg=ft","tags.hostname":"pingu"}\n'
+    '{"_time":"2026-02-16T07:52:47Z","_msg":"phy1-ap0: AP-STA-DISCONNECTED de:ad:be:ef:00:01","tags.hostname":"pingu"}\n'
+    '{"_time":"2026-02-16T07:52:48Z","_msg":"phy1-ap0: AP-STA-CONNECTED de:ad:be:ef:00:01 auth_alg=open","tags.hostname":"golem"}\n'
 )
 
 
@@ -564,14 +564,14 @@ class TestFetchEvents:
 
         e = events[0]
         assert e.event == "connected"
-        assert e.mac == "de:ad:be:ef:99:99"
+        assert e.mac == "de:ad:be:ef:00:01"
         assert e.ap == "pingu"
         assert e.auth_alg == "ft"
         assert e.time == "2026-02-16T07:49:56Z"
 
         e = events[1]
         assert e.event == "disconnected"
-        assert e.mac == "de:ad:be:ef:99:99"
+        assert e.mac == "de:ad:be:ef:00:01"
         assert e.ap == "pingu"
         assert e.auth_alg is None
 
@@ -588,7 +588,7 @@ class TestFetchEvents:
         client = VictoriaLogsClient("http://vl:9428")
         start = datetime(2026, 2, 16, 7, 0, tzinfo=timezone.utc)
         end = datetime(2026, 2, 16, 8, 0, tzinfo=timezone.utc)
-        events = client.fetch_events(start, end, macs=["de:ad:be:ef:99:99"])
+        events = client.fetch_events(start, end, macs=["de:ad:be:ef:00:01"])
 
         # The query should include a MAC filter — all 3 events match this MAC
         assert len(events) == 3
