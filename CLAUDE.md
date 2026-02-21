@@ -32,8 +32,6 @@ openwrt/
 tests/
   conftest.py         # respx mock fixture
   test_*.py           # One test file per module (65 tests)
-docs/plans/
-  openwrt-feed-server.md  # Design doc for self-hosted opkg feed server
 ```
 
 ## Commands
@@ -77,8 +75,7 @@ Deployed on each AP as a prometheus-node-exporter-lua collector. Exports:
 
 - Target: OpenWrt 24.10.x (snapshot)
 - Interface naming: modern (phy1-ap0) and legacy (wlan0) both supported
-- Firmware upgrades via owut; custom packages via opkg from custom feed
-- Feed server design: see docs/plans/openwrt-feed-server.md
+- Firmware upgrades via owut; custom packages via opkg from custom feed (separate repo)
 
 ## Gotchas learned during development
 
