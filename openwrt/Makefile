@@ -1,8 +1,5 @@
 # OpenWrt SDK package Makefile for wifi-dethrash-collector
 # Use with: make package/wifi-dethrash-collector/compile V=s
-#
-# Most users should use build-ipk.sh instead — this Makefile is only
-# needed when building inside the full OpenWrt SDK/buildroot.
 
 include $(TOPDIR)/rules.mk
 
@@ -30,7 +27,7 @@ endef
 
 define Package/wifi-dethrash-collector/install
 	$(INSTALL_DIR) $(1)/usr/lib/lua/prometheus-collectors
-	$(INSTALL_DATA) ../../usr/lib/lua/prometheus-collectors/wifi_dethrash.lua \
+	$(INSTALL_DATA) ./files/usr/lib/lua/prometheus-collectors/wifi_dethrash.lua \
 		$(1)/usr/lib/lua/prometheus-collectors/
 endef
 

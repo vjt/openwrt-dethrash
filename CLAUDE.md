@@ -24,11 +24,9 @@ src/wifi_dethrash/
   dashboard.py        # Grafana 12 dashboard JSON generator (file-import format)
   utils.py            # ifname_to_radio helper
 openwrt/
-  usr/lib/lua/prometheus-collectors/
-    wifi_dethrash.lua # Prometheus collector deployed on OpenWrt APs
-  build-ipk.sh        # Standalone .ipk builder (no SDK needed)
-  package/wifi-dethrash-collector/
-    Makefile           # OpenWrt SDK package Makefile
+  Makefile             # OpenWrt SDK package Makefile
+  files/usr/lib/lua/prometheus-collectors/
+    wifi_dethrash.lua  # Prometheus collector deployed on OpenWrt APs
 tests/
   conftest.py         # respx mock fixture
   test_*.py           # One test file per module (65 tests)
@@ -39,7 +37,6 @@ tests/
 ```bash
 .venv/bin/pytest -v              # run tests (65 tests, ~0.1s)
 .venv/bin/wifi-dethrash --help   # CLI help
-openwrt/build-ipk.sh             # build .ipk package to openwrt/dist/
 ```
 
 ## Key design decisions
