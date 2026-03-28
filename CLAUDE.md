@@ -29,13 +29,73 @@ openwrt/
     wifi_dethrash.lua  # Prometheus collector deployed on OpenWrt APs
 tests/
   conftest.py         # respx mock fixture
-  test_*.py           # One test file per module (65 tests)
+  test_*.py           # One test file per module (67 tests)
 ```
+
+## Engineering Standards
+
+- **Challenge the spec.** If domain knowledge contradicts the
+  requirements, say so before building. A 30-second question costs
+  nothing. Building the wrong thing costs hundreds of commits.
+- **Ask before building.** Before implementing anything substantial:
+  (1) Does the infrastructure already provide this? (2) Is there a
+  10x simpler approach? (3) Will this still exist in two weeks?
+- **Design discipline.** Before proposing recovery mechanisms,
+  tracking structures, or new abstractions:
+  (1) Don't duplicate state that already exists — derive it.
+  (2) Think about the general problem, not the specific incident.
+  (3) Lightweight over heavyweight. If the mechanism is heavier
+  than the problem, the mechanism IS the problem.
+  (4) Think it through before proposing — don't make the human
+  iterate half-baked proposals into shape.
+- **Debug with data first.** Read logs, inspect state, query the
+  source before changing code. NEVER guess. Evidence first.
+- **Never fabricate explanations.** If you don't know why something
+  happened, say "I don't know, let me check" and investigate.
+  A confident wrong explanation is worse than admitting ignorance.
+- **Read before writing.** Before editing any file, read its helpers,
+  utilities, and existing patterns. Grep for what you're about to
+  build — it probably exists.
+- **Implement once, reuse everywhere.** If two places need the same
+  logic, refactor to share it. Never copy-paste with tweaks.
+- **No leaky abstractions.** Each layer owns its domain. Return
+  domain types, not strings/dicts callers parse.
+- **Consistency.** Follow existing patterns. Same problem, same
+  solution.
+- **State the contract.** Signature + failure mode in one sentence
+  before implementing. "Returns X or raises Y."
+- **Fix root causes, not examples.** No band-aids, no
+  `filterwarnings`, no `# type: ignore` without justification.
+- **Type errors are design signals.** When a type constraint blocks
+  your approach, the constraint is probably correct — your approach
+  is probably wrong.
+- **Never swallow exceptions.** Handle explicitly or let crash.
+  Silent failures (like the libuci-lua debacle) are the worst bugs.
+- **Type annotations on all signatures.**
+- **"Done" means done.** Every method migrated, every caller updated,
+  every test fixed, every doc current. Grep for stale references
+  before committing renames.
+- **Bite-sized commits.** One logical change. Messages explain WHY.
+
+### Testing Standards
+
+- Assert outcomes, not call sequences. Ask: "If the implementation
+  were wrong, would this test catch it?"
+- **Never assert buggy behavior.** If you don't understand why the
+  code produces a value, don't write a test that asserts it.
+- Mock at boundaries (HTTP via respx), real dependencies inside.
+- **Use production code in tests** — never hardcode strings or
+  re-implement logic. Build synthetic inputs, not synthetic outputs.
+- **Never weaken production code to make tests pass.** Fix the test.
+- Mock data must be realistic — empty or zeroed fixtures validate
+  nothing.
+- Test helpers mandatory. Names = scenario + outcome.
 
 ## Commands
 
 ```bash
-.venv/bin/pytest -v              # run tests (65 tests, ~0.1s)
+.venv/bin/pytest -v              # run tests (67 tests, ~0.1s)
+.venv/bin/pyright src/ tests/    # type check (zero errors)
 .venv/bin/wifi-dethrash --help   # CLI help
 ```
 
