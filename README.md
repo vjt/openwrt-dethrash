@@ -23,7 +23,7 @@ wifi-dethrash --vm-url http://victoriametrics:8428 --vl-url http://victorialogs:
 | Option | Default | Description |
 |--------|---------|-------------|
 | `--vm-url` | required | VictoriaMetrics base URL |
-| `--vl-url` | required | VictoriaLogs base URL |
+| `--vl-url` | — | VictoriaLogs base URL (required unless `--generate-dashboard`) |
 | `--window` | `24h` | Time window to analyze (e.g. `1h`, `24h`, `7d`) |
 | `--host-label` | `instance` | Metric label containing AP hostname |
 | `--mac` | all | Filter to specific MAC address(es), repeatable |
@@ -40,8 +40,8 @@ wifi-dethrash --vm-url http://vm:8428 --vl-url http://vl:9428
 # Analyze last hour for a specific device
 wifi-dethrash --vm-url http://vm:8428 --vl-url http://vl:9428 --window 1h --mac aa:bb:cc:dd:ee:ff
 
-# Generate Grafana dashboard
-wifi-dethrash --vm-url http://vm:8428 --vl-url http://vl:9428 --generate-dashboard dashboard.json
+# Generate Grafana dashboard (only needs VM, no VL required)
+wifi-dethrash --vm-url http://vm:8428 --generate-dashboard dashboard.json
 ```
 
 ### Example output
@@ -83,6 +83,8 @@ wifi-dethrash --vm-url http://vm:8428 --vl-url http://vl:9428 --generate-dashboa
 - `wifi_network_noise_dbm` — noise floor per radio (labels: `device`, `channel`, `frequency`)
 - `wifi_radio_txpower_dbm` — effective txpower per radio (labels: `device`, `ifname`, `ssid`)
 - `wifi_radio_configured_txpower` — UCI-configured txpower per radio (label: `device`)
+- `wifi_radio_channel` — current channel per radio
+- `wifi_radio_frequency_mhz` — current frequency per radio
 
 **VictoriaLogs** — hostapd syslog events shipped via Telegraf:
 
@@ -91,42 +93,39 @@ wifi-dethrash --vm-url http://vm:8428 --vl-url http://vl:9428 --generate-dashboa
 
 ## Collector deployment
 
-The `openwrt/` directory contains a custom Prometheus collector for OpenWrt APs
-that exports radio metrics, 802.11r/k/v config, and usteer thresholds.
+The `openwrt/` directory contains an OpenWrt package (`wifi-dethrash-collector`)
+that installs a custom `prometheus-node-exporter-lua` collector on each AP.
 
-### Manual deploy
+It exports radio metrics (txpower, channel, frequency), 802.11r/k/v config,
+and usteer thresholds.
+
+### Package build
+
+Build a `.ipk` package using the OpenWrt SDK:
 
 ```bash
-scp openwrt/usr/lib/lua/prometheus-collectors/wifi_dethrash.lua \
-  root@<ap>:/usr/lib/lua/prometheus-collectors/
-ssh root@<ap> /etc/init.d/prometheus-node-exporter-lua restart
+# From the SDK directory
+echo "src-link wifi-dethrash /path/to/openwrt-dethrash/openwrt" >> feeds.conf
+./scripts/feeds update wifi-dethrash
+./scripts/feeds install wifi-dethrash-collector
+make package/wifi-dethrash-collector/compile V=s
 ```
 
-### Package build (.ipk)
-
-Build a standard `.ipk` package without the OpenWrt SDK:
+### Install on AP
 
 ```bash
-openwrt/build-ipk.sh              # outputs to openwrt/dist/
-openwrt/build-ipk.sh /path/to/feed  # outputs to custom directory
-```
-
-This creates:
-- `wifi-dethrash-collector_0.1.0-1_all.ipk`
-- `Packages` and `Packages.gz` index files
-
-### Hosting a package feed
-
-Serve the output directory over HTTP (nginx, caddy, python -m http.server, etc.).
-
-On each AP, add the feed:
-
-```bash
-echo "src/gz wifi-dethrash http://<your-server>/openwrt-feed" \
+# Add custom feed (once)
+echo "src/gz wifi-dethrash http://<feed-server>/openwrt-feed" \
   >> /etc/opkg/customfeeds.conf
+
+# Install (pulls in prometheus-node-exporter-lua and libuci-lua automatically)
 opkg update
 opkg install wifi-dethrash-collector
 ```
+
+The collector also exports:
+- `wifi_iface_ieee80211r_enabled`, `wifi_iface_ieee80211k_enabled`, `wifi_iface_ieee80211v_enabled`
+- `wifi_usteer_min_connect_snr`, `wifi_usteer_min_snr`, `wifi_usteer_roam_scan_snr`, etc.
 
 ## Development
 
