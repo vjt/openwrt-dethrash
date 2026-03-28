@@ -74,7 +74,8 @@ class ThrashingDetector:
         if len(aps) != 2:
             return None
 
-        ap_pair = tuple(sorted(aps))
+        a, b = sorted(aps)
+        ap_pair = (a, b)
         return ThrashSequence(
             mac=mac,
             ap_pair=ap_pair,

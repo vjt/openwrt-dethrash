@@ -2,6 +2,7 @@ import re
 import ssl
 import sys
 from datetime import datetime, timedelta, timezone
+from typing import NoReturn
 
 import click
 import httpx
@@ -29,7 +30,7 @@ def _parse_window(window: str) -> timedelta:
     return timedelta(days=val)
 
 
-def _handle_error(source: str, exc: Exception) -> None:
+def _handle_error(source: str, exc: Exception) -> NoReturn:
     """Print a user-friendly error message and exit."""
     if isinstance(exc, httpx.HTTPStatusError):
         click.echo(
