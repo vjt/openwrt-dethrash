@@ -56,43 +56,44 @@ local function scrape()
     local uci = require "uci"
     return uci.cursor()
   end)
-  if not ok or not ucic then return end
 
-  local metric_configured_txpower = metric("wifi_radio_configured_txpower", "gauge")
-  local metric_80211r = metric("wifi_iface_ieee80211r_enabled", "gauge")
-  local metric_80211k = metric("wifi_iface_ieee80211k_enabled", "gauge")
-  local metric_80211v = metric("wifi_iface_ieee80211v_enabled", "gauge")
+  if ok and ucic then
+    local metric_configured_txpower = metric("wifi_radio_configured_txpower", "gauge")
+    local metric_80211r = metric("wifi_iface_ieee80211r_enabled", "gauge")
+    local metric_80211k = metric("wifi_iface_ieee80211k_enabled", "gauge")
+    local metric_80211v = metric("wifi_iface_ieee80211v_enabled", "gauge")
 
-  ucic:foreach("wireless", "wifi-device", function(s)
-    local txp = tonumber(s.txpower)
-    if txp then
-      metric_configured_txpower({device = s[".name"]}, txp)
-    end
-  end)
+    ucic:foreach("wireless", "wifi-device", function(s)
+      local txp = tonumber(s.txpower)
+      if txp then
+        metric_configured_txpower({device = s[".name"]}, txp)
+      end
+    end)
 
-  ucic:foreach("wireless", "wifi-iface", function(s)
-    local dev = s.device or ""
-    local ssid = s.ssid or ""
+    ucic:foreach("wireless", "wifi-iface", function(s)
+      local dev = s.device or ""
+      local ssid = s.ssid or ""
 
-    -- Find runtime ifname from ubus data for this device+ssid
-    local ifname = ""
-    local ifaces = iface_by_device[dev]
-    if ifaces then
-      for _, iface in ipairs(ifaces) do
-        if iface.ssid == ssid then
-          ifname = iface.ifname
-          break
+      -- Find runtime ifname from ubus data for this device+ssid
+      local ifname = ""
+      local ifaces = iface_by_device[dev]
+      if ifaces then
+        for _, iface in ipairs(ifaces) do
+          if iface.ssid == ssid then
+            ifname = iface.ifname
+            break
+          end
         end
       end
-    end
 
-    local labels = {device = dev, ifname = ifname, ssid = ssid}
-    metric_80211r(labels, (s.ieee80211r == "1") and 1 or 0)
-    metric_80211k(labels, (s.ieee80211k == "1") and 1 or 0)
+      local labels = {device = dev, ifname = ifname, ssid = ssid}
+      metric_80211r(labels, (s.ieee80211r == "1") and 1 or 0)
+      metric_80211k(labels, (s.ieee80211k == "1") and 1 or 0)
 
-    local v_enabled = (s.ieee80211v == "1") or (s.bss_transition == "1")
-    metric_80211v(labels, v_enabled and 1 or 0)
-  end)
+      local v_enabled = (s.ieee80211v == "1") or (s.bss_transition == "1")
+      metric_80211v(labels, v_enabled and 1 or 0)
+    end)
+  end
 
   -- Phase 3: UCI usteer config
   pcall(function()
