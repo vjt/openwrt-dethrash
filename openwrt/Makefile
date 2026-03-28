@@ -13,7 +13,7 @@ define Package/wifi-dethrash-collector
   SECTION:=utils
   CATEGORY:=Utilities
   TITLE:=WiFi Dethrash Prometheus Collector
-  DEPENDS:=+prometheus-node-exporter-lua
+  DEPENDS:=+prometheus-node-exporter-lua +libuci-lua
   PKGARCH:=all
 endef
 
