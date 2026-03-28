@@ -18,10 +18,11 @@ class TxPowerRecommendation:
     overlap_pct: int
     avg_rssi_a: float              # avg RSSI for ap_pair[0]
     avg_rssi_b: float              # avg RSSI for ap_pair[1]
-    louder_ap: str                 # which AP has the stronger signal
+    louder_ap: str                 # AP to reduce (highest headroom or strongest signal)
     current_txpower_a: int | None = None
     current_txpower_b: int | None = None
-    suggested_txpower: int | None = None  # for the louder AP
+    suggested_txpower: int | None = None  # for louder_ap
+    skip_reason: str | None = None        # why suggestion was skipped
 
 
 @dataclass
@@ -36,9 +37,11 @@ class UCICommand:
 
 
 class Recommender:
-    def __init__(self, min_snr_value: int = 15, overlap_threshold: int = 6):
+    def __init__(self, min_snr_value: int = 15, overlap_threshold: int = 6,
+                 rssi_floor: int = -75):
         self._min_snr_value = min_snr_value
         self._overlap_threshold = overlap_threshold
+        self._rssi_floor = rssi_floor
 
     def txpower_recommendations(
         self,
@@ -91,12 +94,33 @@ class Recommender:
             current_txpower_a = txp_a_reading.txpower_dbm if txp_a_reading else None
             current_txpower_b = txp_b_reading.txpower_dbm if txp_b_reading else None
 
-            # Compute suggested txpower for the louder AP
+            # Compute suggested txpower for the AP with more headroom
             suggested = None
-            louder_txp = current_txpower_a if louder == pair[0] else current_txpower_b
-            if louder_txp is not None:
-                reduction = max(self._overlap_threshold - best.rssi_diff + 2, 2)
-                suggested = max(int(louder_txp - reduction), 5)
+            louder_rssi = best.avg_rssi_a if louder == pair[0] else best.avg_rssi_b
+
+            # Pick which AP to reduce: prefer the one with higher txpower
+            # (more headroom). Fall back to louder signal if txpower is equal.
+            reduce_ap = louder
+            reduce_txp = current_txpower_a if louder == pair[0] else current_txpower_b
+            other_txp = current_txpower_b if louder == pair[0] else current_txpower_a
+
+            if reduce_txp is not None and other_txp is not None:
+                if other_txp > reduce_txp:
+                    # Other AP has more headroom — reduce that one instead
+                    reduce_ap = pair[1] if louder == pair[0] else pair[0]
+                    reduce_txp = other_txp
+                    louder_rssi = best.avg_rssi_b if louder == pair[0] else best.avg_rssi_a
+
+            louder = reduce_ap
+
+            skip_reason = None
+            if reduce_txp is not None and louder_rssi > self._rssi_floor:
+                # Conservative: 2 dBm step. Iterate rather than overshoot.
+                suggested = max(reduce_txp - 2, 5)
+            elif reduce_txp is not None:
+                skip_reason = (
+                    f"RSSI already weak ({louder_rssi} dBm <= {self._rssi_floor} dBm floor)"
+                )
 
             recs.append(TxPowerRecommendation(
                 ap_pair=pair,
@@ -111,6 +135,7 @@ class Recommender:
                 current_txpower_a=current_txpower_a,
                 current_txpower_b=current_txpower_b,
                 suggested_txpower=suggested,
+                skip_reason=skip_reason,
             ))
 
         recs.sort(key=lambda r: r.total_thrash_connects, reverse=True)

@@ -100,6 +100,10 @@ def render_report(
                 lines.append(
                     f"        ssh root@{r.louder_ap} uci set wireless.{r.radio}.txpower={r.suggested_txpower}"
                 )
+            elif r.skip_reason:
+                lines.append(
+                    f"     -> No txpower change: {r.skip_reason}"
+                )
             else:
                 lines.append(
                     f"     -> Consider reducing txpower on {r.louder_ap} ({r.radio})"

@@ -190,8 +190,8 @@ class TestTxPowerRecommendation:
         assert r.current_txpower_a == 23
         assert r.current_txpower_b == 20
         assert r.suggested_txpower is not None
-        # reduction = max(6 - 3 + 2, 2) = 5, so 23 - 5 = 18
-        assert r.suggested_txpower == 18
+        # Conservative 2 dBm step: 23 - 2 = 21
+        assert r.suggested_txpower == 21
 
     def test_suggested_txpower_clamped_to_minimum(self):
         """Suggested txpower should not go below 5 dBm."""
@@ -215,13 +215,83 @@ class TestTxPowerRecommendation:
         )]
         txpower = [
             TxPowerReading(ap="golem", radio="radio1", ifname="phy1-ap0",
-                           txpower_dbm=8, configured_txpower=8, channel=149, frequency_mhz=5745),
+                           txpower_dbm=6, configured_txpower=6, channel=149, frequency_mhz=5745),
         ]
 
         rec = Recommender(overlap_threshold=6)
         recs = rec.txpower_recommendations(thrash, overlap, txpower=txpower)
 
         assert recs[0].suggested_txpower == 5
+
+    def test_skips_when_rssi_below_floor(self):
+        """Should not suggest reduction when RSSI is already weak."""
+        thrash = [ThrashSequence(
+            mac="aa:bb:cc:dd:ee:01",
+            ap_pair=("albert", "pingu"),
+            count=30,
+            first_time="T1",
+            last_time="T2",
+        )]
+        overlap = [OverlapResult(
+            mac="aa:bb:cc:dd:ee:01",
+            ap_pair=("albert", "pingu"),
+            rssi_diff=3.5,
+            overlap_count=60,
+            total_samples=353,
+            avg_rssi_a=-84,
+            avg_rssi_b=-83,
+            ifname_a="phy1-ap0",
+            ifname_b="phy1-ap0",
+        )]
+        txpower = [
+            TxPowerReading(ap="albert", radio="radio1", ifname="phy1-ap0",
+                           txpower_dbm=19, configured_txpower=19, channel=100, frequency_mhz=5500),
+            TxPowerReading(ap="pingu", radio="radio1", ifname="phy1-ap0",
+                           txpower_dbm=20, configured_txpower=20, channel=100, frequency_mhz=5500),
+        ]
+
+        rec = Recommender(overlap_threshold=6, rssi_floor=-75)
+        recs = rec.txpower_recommendations(thrash, overlap, txpower=txpower)
+
+        assert len(recs) == 1
+        assert recs[0].suggested_txpower is None
+        assert recs[0].skip_reason is not None
+        assert "-75" in recs[0].skip_reason
+
+    def test_prefers_higher_txpower_ap(self):
+        """Should reduce the AP with higher txpower (more headroom)."""
+        thrash = [ThrashSequence(
+            mac="aa:bb:cc:dd:ee:01",
+            ap_pair=("golem", "pingu"),
+            count=20,
+            first_time="T1",
+            last_time="T2",
+        )]
+        overlap = [OverlapResult(
+            mac="aa:bb:cc:dd:ee:01",
+            ap_pair=("golem", "pingu"),
+            rssi_diff=1.0,
+            overlap_count=50,
+            total_samples=100,
+            avg_rssi_a=-60,  # golem slightly louder
+            avg_rssi_b=-61,
+            ifname_a="phy1-ap0",
+            ifname_b="phy1-ap0",
+        )]
+        txpower = [
+            TxPowerReading(ap="golem", radio="radio1", ifname="phy1-ap0",
+                           txpower_dbm=16, configured_txpower=16, channel=100, frequency_mhz=5500),
+            TxPowerReading(ap="pingu", radio="radio1", ifname="phy1-ap0",
+                           txpower_dbm=22, configured_txpower=22, channel=100, frequency_mhz=5500),
+        ]
+
+        rec = Recommender()
+        recs = rec.txpower_recommendations(thrash, overlap, txpower=txpower)
+
+        assert len(recs) == 1
+        # pingu has higher txpower (22 vs 16), reduce that one
+        assert recs[0].louder_ap == "pingu"
+        assert recs[0].suggested_txpower == 20
 
     def test_no_txpower_data_gives_none(self):
         """Without txpower data, fields should be None."""

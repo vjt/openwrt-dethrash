@@ -62,8 +62,9 @@ def _handle_error(source: str, exc: Exception) -> NoReturn:
               help="Write Grafana dashboard JSON to file and exit")
 @click.option("--overlap-threshold", default=6, help="Max RSSI diff (dB) to count as overlap")
 @click.option("--snr-threshold", default=15, help="Min SNR (dB) for a healthy association")
+@click.option("--rssi-floor", default=-75, help="Min RSSI (dBm) below which txpower reduction is skipped")
 def main(vm_url, vl_url, window, host_label, mac, generate_dashboard,
-         overlap_threshold, snr_threshold):
+         overlap_threshold, snr_threshold, rssi_floor):
     """WiFi mesh thrashing analyzer for OpenWrt."""
     delta = _parse_window(window)
     end = datetime.now(timezone.utc)
@@ -119,7 +120,8 @@ def main(vm_url, vl_url, window, host_label, mac, generate_dashboard,
     overlap = OverlapAnalyzer(overlap_threshold).analyze(rssi)
     weak = WeakAssociationAnalyzer(snr_threshold).analyze(rssi, noise)
 
-    rec = Recommender(min_snr_value=snr_threshold, overlap_threshold=overlap_threshold)
+    rec = Recommender(min_snr_value=snr_threshold, overlap_threshold=overlap_threshold,
+                      rssi_floor=rssi_floor)
     txpower_recs = rec.txpower_recommendations(thrash, overlap, txpower=txpower)
     usteer_commands = rec.usteer_commands(weak)
 
