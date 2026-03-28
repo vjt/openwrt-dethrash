@@ -42,8 +42,9 @@ class WeakAssociationAnalyzer:
             )
             if noise_val is not None:
                 snr = r.rssi - noise_val
-                snr_by_mac_ap[(r.mac, r.ap)].append(snr)
-                ifname_by_mac_ap[(r.mac, r.ap)] = r.ifname
+                mac = r.mac.lower()
+                snr_by_mac_ap[(mac, r.ap)].append(snr)
+                ifname_by_mac_ap[(mac, r.ap)] = r.ifname
 
         results = []
         for (mac, ap), snrs in snr_by_mac_ap.items():

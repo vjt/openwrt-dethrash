@@ -1,9 +1,12 @@
 import json
+import logging
 import re
 from dataclasses import dataclass
 from datetime import datetime
 
 import httpx
+
+log = logging.getLogger(__name__)
 
 _MSG_RE = re.compile(
     r"([\w-]+): AP-STA-(CONNECTED|DISCONNECTED) "
@@ -65,7 +68,11 @@ class VictoriaLogsClient:
         for line in resp.text.strip().split("\n"):
             if not line:
                 continue
-            row = json.loads(line)
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError:
+                log.warning("Skipping malformed JSONL line: %s", line[:200])
+                continue
             msg = row.get("_msg", "")
             m = _MSG_RE.search(msg)
             if not m:

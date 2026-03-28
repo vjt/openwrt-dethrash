@@ -69,6 +69,17 @@ class TestWeakAssociation:
         # SNR = -80 - (-85) = 5
         assert results[0].avg_snr == 5
 
+    def test_normalizes_mac_to_lowercase(self):
+        """Uppercase MACs in RSSI data should be normalized."""
+        rssi = [_r("AA:BB:CC:DD:EE:01", "pingu", -80, 1000)]
+        noise = [_n("pingu", -90, 1000)]
+
+        analyzer = WeakAssociationAnalyzer(snr_threshold=15)
+        results = analyzer.analyze(rssi, noise)
+
+        assert len(results) == 1
+        assert results[0].mac == "aa:bb:cc:dd:ee:01"
+
     def test_no_noise_for_radio_skips(self):
         """If no noise data exists for the station's radio, skip it."""
         rssi = [_r("aa:bb:cc:dd:ee:01", "pingu", -80, 1000, ifname="phy0-ap0")]

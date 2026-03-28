@@ -73,6 +73,24 @@ class TestFetchEvents:
 
         assert events[0].ap == "router1"
 
+    def test_skips_malformed_json_lines(self, respx_mock):
+        """Malformed JSONL lines should be silently skipped."""
+        resp_text = (
+            '{"_time":"2026-02-16T07:49:56Z","_msg":"phy1-ap0: AP-STA-CONNECTED de:ad:be:ef:00:01 auth_alg=ft","tags.hostname":"pingu"}\n'
+            'NOT VALID JSON\n'
+            '{"_time":"2026-02-16T07:52:48Z","_msg":"phy0-ap0: AP-STA-CONNECTED de:ad:be:ef:00:01 auth_alg=open","tags.hostname":"golem"}\n'
+        )
+        respx_mock.get("http://vl:9428/select/logsql/query").respond(text=resp_text)
+
+        client = VictoriaLogsClient("http://vl:9428")
+        start = datetime(2026, 2, 16, 7, 0, tzinfo=timezone.utc)
+        end = datetime(2026, 2, 16, 8, 0, tzinfo=timezone.utc)
+        events = client.fetch_events(start, end)
+
+        assert len(events) == 2
+        assert events[0].ap == "pingu"
+        assert events[1].ap == "golem"
+
     def test_sorts_by_time(self, respx_mock):
         # Out of order
         resp_text = (
