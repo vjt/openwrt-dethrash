@@ -177,7 +177,7 @@ def _build_panels(
                     "expr": (
                         'tags.appname:hostapd AND _msg:AP-STA-CONNECTED'
                         ' | extract "AP-STA-CONNECTED <mac> auth_alg=<auth>" from _msg'
-                        ' | format "🟢 <_time> <mac> ▸ <tags.hostname> (<auth>)" as _msg'
+                        ' | format "🟢 <_time> <fields.station> (<mac>) ▸ <tags.hostname> (<auth>)" as _msg'
                     ),
                 },
                 {
@@ -185,7 +185,7 @@ def _build_panels(
                     "expr": (
                         'tags.appname:hostapd AND _msg:AP-STA-DISCONNECTED'
                         ' | extract "AP-STA-DISCONNECTED <mac>" from _msg'
-                        ' | format "🔴 <_time> <mac> ◂ <tags.hostname>" as _msg'
+                        ' | format "🔴 <_time> <fields.station> (<mac>) ◂ <tags.hostname>" as _msg'
                     ),
                 },
             ],
@@ -354,7 +354,7 @@ def _build_panels(
                         'tags.appname:hostapd AND _msg:AP-STA-CONNECTED'
                         ' | extract_regexp "CONNECTED (?P<mac>[0-9a-fA-F:]{17})" from _msg'
                         ' | extract "auth_alg=<auth>" from _msg'
-                        ' | fields _time, mac, tags.hostname, auth'
+                        ' | fields _time, fields.station, mac, tags.hostname, auth'
                     ),
                 }
             ],
@@ -364,8 +364,11 @@ def _build_panels(
                     {"matcher": {"id": "byName", "options": "_time"}, "properties": [
                         {"id": "displayName", "value": "Time"},
                     ]},
-                    {"matcher": {"id": "byName", "options": "mac"}, "properties": [
+                    {"matcher": {"id": "byName", "options": "fields.station"}, "properties": [
                         {"id": "displayName", "value": "Station"},
+                    ]},
+                    {"matcher": {"id": "byName", "options": "mac"}, "properties": [
+                        {"id": "displayName", "value": "MAC"},
                     ]},
                     {"matcher": {"id": "byName", "options": "tags.hostname"}, "properties": [
                         {"id": "displayName", "value": "AP"},
