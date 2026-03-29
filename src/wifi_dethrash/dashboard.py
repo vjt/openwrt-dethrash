@@ -187,7 +187,7 @@ def _build_panels(
                     "expr": (
                         'tags.appname:hostapd AND _msg:AP-STA-CONNECTED'
                         ' | extract "AP-STA-CONNECTED <mac> auth_alg=<auth>" from _msg'
-                        ' | format "<mac> \u2192 <tags.hostname> (<auth>)" as _msg'
+                        ' | format "🟢 <mac> ▸ <tags.hostname> (<auth>)" as _msg'
                         + _logsql_replace_chain(mac_names)
                     ),
                 },
@@ -196,7 +196,7 @@ def _build_panels(
                     "expr": (
                         'tags.appname:hostapd AND _msg:AP-STA-DISCONNECTED'
                         ' | extract "AP-STA-DISCONNECTED <mac>" from _msg'
-                        ' | format "<mac> \u2190 <tags.hostname>" as _msg'
+                        ' | format "🔴 <mac> ◂ <tags.hostname>" as _msg'
                         + _logsql_replace_chain(mac_names)
                     ),
                 },
