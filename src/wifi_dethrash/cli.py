@@ -10,6 +10,7 @@ import truststore
 
 truststore.inject_into_ssl()
 
+from wifi_dethrash.config import CONFIG_PATH, load_config
 from wifi_dethrash.sources.vm import VictoriaMetricsClient
 from wifi_dethrash.sources.vl import VictoriaLogsClient
 from wifi_dethrash.analyzers.thrashing import ThrashingDetector
@@ -53,42 +54,102 @@ def _handle_error(source: str, exc: Exception) -> NoReturn:
 
 
 @click.command()
-@click.option("--vm-url", required=True, help="VictoriaMetrics base URL")
+@click.option("--config", "config_path", type=click.Path(), default=None,
+              help="Config file path (default: ~/.config/wifi-dethrash/config.toml)")
+@click.option("--vm-url", default=None, help="VictoriaMetrics base URL")
 @click.option("--vl-url", default=None, help="VictoriaLogs base URL (required for analysis)")
+@click.option("--grafana-url", default=None, help="Grafana base URL")
+@click.option("--grafana-api-key", default=None, help="Grafana service account token")
+@click.option("--mesh-ssids", multiple=True, help="Mesh SSIDs to filter APs (e.g. Mercury Saturn)")
 @click.option("--window", default="24h", help="Time window to analyze (e.g. 1h, 24h, 7d)")
 @click.option("--host-label", default="instance", help="Metric label containing AP hostname")
 @click.option("--mac", multiple=True, help="Filter to specific MAC address(es)")
 @click.option("--generate-dashboard", type=click.Path(), default=None,
               help="Write Grafana dashboard JSON to file and exit")
+@click.option("--push-dashboard", is_flag=True, default=False,
+              help="Push dashboard to Grafana via API and exit")
 @click.option("--overlap-threshold", default=6, help="Max RSSI diff (dB) to count as overlap")
 @click.option("--snr-threshold", default=15, help="Min SNR (dB) for a healthy association")
 @click.option("--rssi-floor", default=-75, help="Min RSSI (dBm) below which txpower reduction is skipped")
-def main(vm_url, vl_url, window, host_label, mac, generate_dashboard,
-         overlap_threshold, snr_threshold, rssi_floor):
+def main(config_path, vm_url, vl_url, grafana_url, grafana_api_key,
+         mesh_ssids, window, host_label, mac, generate_dashboard,
+         push_dashboard, overlap_threshold, snr_threshold, rssi_floor):
     """WiFi mesh thrashing analyzer for OpenWrt."""
+    from pathlib import Path
+
+    cfg = load_config(Path(config_path) if config_path else CONFIG_PATH)
+
+    # CLI options override config file
+    effective_vm_url = vm_url or cfg.vm_url
+    effective_vl_url = vl_url or cfg.vl_url
+    effective_grafana_url = grafana_url or cfg.grafana_url
+    effective_grafana_api_key = grafana_api_key or cfg.grafana_api_key
+    effective_mesh_ssids = list(mesh_ssids) if mesh_ssids else cfg.mesh_ssids
+
+    if not effective_vm_url:
+        raise click.UsageError("--vm-url required (or set vm_url in config)")
+
     delta = _parse_window(window)
     end = datetime.now(timezone.utc)
     start = end - delta
 
     macs = list(mac) if mac else None
 
-    if not generate_dashboard and not vl_url:
-        raise click.UsageError("--vl-url is required for analysis mode")
+    if push_dashboard:
+        if not effective_grafana_url:
+            raise click.UsageError("--grafana-url required (or set grafana_url in config)")
+        if not effective_grafana_api_key:
+            raise click.UsageError("--grafana-api-key required (or set grafana_api_key in config)")
+
+    if not generate_dashboard and not push_dashboard and not effective_vl_url:
+        raise click.UsageError("--vl-url is required for analysis mode (or set vl_url in config)")
 
     try:
-        with VictoriaMetricsClient(vm_url, host_label=host_label) as vm:
+        with VictoriaMetricsClient(effective_vm_url, host_label=host_label) as vm:
+            click.echo(f"Discovering APs from {effective_vm_url} ...")
+            aps = vm.discover_aps()
+
+            click.echo("Fetching txpower data ...")
+            try:
+                txpower = vm.fetch_txpower()
+            except Exception:
+                txpower = None
+
+            # SSID-based AP filtering
+            if effective_mesh_ssids and txpower:
+                mesh_aps = {t.ap for t in txpower if t.ssid in effective_mesh_ssids}
+                if mesh_aps:
+                    filtered = [a for a in aps if a.hostname in mesh_aps]
+                    excluded = len(aps) - len(filtered)
+                    if excluded:
+                        click.echo(f"Filtered to {len(filtered)} mesh APs "
+                                   f"({excluded} non-mesh excluded)")
+                    aps = filtered
+                    txpower = [t for t in txpower if t.ap in mesh_aps]
+
+            click.echo(f"Found {len(aps)} APs: {', '.join(a.hostname for a in aps)}")
+
             if generate_dashboard:
                 from wifi_dethrash.dashboard import generate_dashboard as gen_dash
-                aps = vm.discover_aps()
-                dashboard_json = gen_dash(aps)
+                dashboard_json = gen_dash(aps, ap_locations=cfg.aps)
                 with open(generate_dashboard, "w") as f:
                     f.write(dashboard_json)
                 click.echo(f"Dashboard written to {generate_dashboard}")
                 return
 
-            click.echo(f"Discovering APs from {vm_url} ...")
-            aps = vm.discover_aps()
-            click.echo(f"Found {len(aps)} APs: {', '.join(a.hostname for a in aps)}")
+            if push_dashboard:
+                from wifi_dethrash.dashboard import generate_dashboard_api
+                from wifi_dethrash.grafana import GrafanaClient
+                with GrafanaClient(effective_grafana_url, effective_grafana_api_key) as gf:
+                    datasources = gf.discover_datasources()
+                    prom_uid = gf.find_datasource_uid(datasources, "prometheus")
+                    vl_uid = gf.find_datasource_uid(
+                        datasources, "victoriametrics-logs-datasource")
+                    dashboard = generate_dashboard_api(
+                        aps, prom_uid, vl_uid, ap_locations=cfg.aps)
+                    url = gf.push_dashboard(dashboard)
+                click.echo(f"Dashboard pushed: {effective_grafana_url}{url}")
+                return
 
             click.echo(f"Fetching RSSI data ({window} window) ...")
             rssi = vm.fetch_rssi(start, end, macs=macs)
@@ -96,22 +157,17 @@ def main(vm_url, vl_url, window, host_label, mac, generate_dashboard,
             click.echo("Fetching noise floor data ...")
             noise = vm.fetch_noise(start, end)
 
-            click.echo("Fetching txpower data ...")
-            try:
-                txpower = vm.fetch_txpower()
-            except Exception:
-                txpower = None
     except (httpx.HTTPStatusError, httpx.ConnectError, httpx.TimeoutException,
             ssl.SSLError) as exc:
-        _handle_error(f"VictoriaMetrics ({vm_url})", exc)
+        _handle_error(f"VictoriaMetrics ({effective_vm_url})", exc)
 
     try:
-        with VictoriaLogsClient(vl_url) as vl:
+        with VictoriaLogsClient(effective_vl_url) as vl:
             click.echo("Fetching hostapd events ...")
             events = vl.fetch_events(start, end, macs=macs)
     except (httpx.HTTPStatusError, httpx.ConnectError, httpx.TimeoutException,
             ssl.SSLError) as exc:
-        _handle_error(f"VictoriaLogs ({vl_url})", exc)
+        _handle_error(f"VictoriaLogs ({effective_vl_url})", exc)
 
     click.echo(f"Got {len(rssi)} RSSI readings, {len(events)} hostapd events.")
 

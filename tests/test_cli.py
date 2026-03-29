@@ -34,6 +34,13 @@ VM_NOISE_RESP = {
     }
 }
 
+VM_TXPOWER_RESP = {
+    "data": {
+        "resultType": "vector",
+        "result": [],
+    }
+}
+
 VL_EVENTS = '{"_time":"2026-02-16T08:00:00Z","_msg":"phy1-ap0: AP-STA-CONNECTED aa:bb:cc:dd:ee:01 auth_alg=open","tags.hostname":"pingu"}\n'
 
 
@@ -42,6 +49,10 @@ class TestCLI:
         # VM: label values
         respx_mock.get("http://vm:8428/api/v1/label/instance/values").respond(
             json=VM_LABEL_RESP
+        )
+        # VM: txpower instant query
+        respx_mock.get("http://vm:8428/api/v1/query").respond(
+            json=VM_TXPOWER_RESP
         )
         # VM: RSSI and noise query_range (both hit the same endpoint)
         respx_mock.get("http://vm:8428/api/v1/query_range").respond(
@@ -80,6 +91,9 @@ class TestCLI:
     def test_vl_http_error_shows_friendly_message(self, respx_mock):
         respx_mock.get("http://vm:8428/api/v1/label/instance/values").respond(
             json=VM_LABEL_RESP
+        )
+        respx_mock.get("http://vm:8428/api/v1/query").respond(
+            json=VM_TXPOWER_RESP
         )
         respx_mock.get("http://vm:8428/api/v1/query_range").respond(
             json=VM_RSSI_RESP
