@@ -81,17 +81,18 @@ def _build_topology_panel(
     }
 
 
-def _mac_overrides(mac_names: dict[str, str]) -> list[dict[str, object]]:
-    """Build Grafana field overrides that rename MAC series to hostnames."""
-    overrides: list[dict[str, object]] = []
+def _mac_transforms(mac_names: dict[str, str]) -> list[dict[str, object]]:
+    """Build Grafana renameByRegex transformations for MAC→hostname."""
+    transforms: list[dict[str, object]] = []
     for mac, name in sorted(mac_names.items()):
-        overrides.append({
-            "matcher": {"id": "byRegexp", "options": f".*{mac}.*"},
-            "properties": [
-                {"id": "displayName", "value": f"{name} ({mac})"},
-            ],
+        transforms.append({
+            "id": "renameByRegex",
+            "options": {
+                "regex": f"(.*){mac}(.*)",
+                "renamePattern": f"$1{name}$2",
+            },
         })
-    return overrides
+    return transforms
 
 
 def _build_panels(
@@ -101,7 +102,7 @@ def _build_panels(
 ) -> list[dict[str, object]]:
     """Build panel list with datasource placeholders."""
     instance_re = "|".join(a.instance for a in aps)
-    mac_ovr = _mac_overrides(mac_names) if mac_names else []
+    mac_tx = _mac_transforms(mac_names) if mac_names else []
 
     panels: list[dict[str, object]] = [
         {
@@ -122,9 +123,10 @@ def _build_panels(
                     "unit": "dBm",
                     "custom": {"drawStyle": "line", "lineWidth": 1},
                 },
-                "overrides": mac_ovr,
+                "overrides": [],
             },
             "options": {},
+            "transformations": mac_tx,
         },
         {
             "id": 2,
@@ -326,7 +328,7 @@ def _build_panels(
             ],
             "fieldConfig": {
                 "defaults": {"unit": "dBm"},
-                "overrides": mac_ovr,
+                "overrides": [],
             },
             "options": {
                 "calculate": True,
@@ -334,6 +336,7 @@ def _build_panels(
                 "color": {"mode": "scheme", "scheme": "RdYlGn", "reverse": True},
                 "yAxis": {"unit": "dBm"},
             },
+            "transformations": mac_tx,
         },
         {
             "id": 10,
@@ -365,9 +368,10 @@ def _build_panels(
                         ],
                     },
                 },
-                "overrides": mac_ovr,
+                "overrides": [],
             },
             "options": {"tooltip": {"mode": "multi"}},
+            "transformations": mac_tx,
         },
         {
             "id": 11,
