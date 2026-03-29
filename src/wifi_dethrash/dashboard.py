@@ -94,16 +94,6 @@ def _label_map_args(mac_names: dict[str, str]) -> str:
     return f'"mac", {pairs}'
 
 
-def _logsql_replace_chain(mac_names: dict[str, str] | None) -> str:
-    """Build LogsQL replace pipe chain for MAC→hostname in log messages."""
-    if not mac_names:
-        return ""
-    return " | " + " | ".join(
-        f'replace ("{mac}", "{name}")'
-        for mac, name in sorted(mac_names.items())
-    )
-
-
 def _wrap_label_map(expr: str, mac_names: dict[str, str] | None) -> str:
     """Wrap a PromQL expression with label_map() and station filter.
 
@@ -188,8 +178,6 @@ def _build_panels(
                         'tags.appname:hostapd AND _msg:AP-STA-CONNECTED'
                         ' | extract "AP-STA-CONNECTED <mac> auth_alg=<auth>" from _msg'
                         ' | format "🟢 <_time> <mac> ▸ <tags.hostname> (<auth>)" as _msg'
-                        + _logsql_replace_chain(mac_names)
-                        + ' | filter _msg:re("$station")'
                     ),
                 },
                 {
@@ -198,8 +186,6 @@ def _build_panels(
                         'tags.appname:hostapd AND _msg:AP-STA-DISCONNECTED'
                         ' | extract "AP-STA-DISCONNECTED <mac>" from _msg'
                         ' | format "🔴 <_time> <mac> ◂ <tags.hostname>" as _msg'
-                        + _logsql_replace_chain(mac_names)
-                        + ' | filter _msg:re("$station")'
                     ),
                 },
             ],
@@ -335,9 +321,6 @@ def _build_panels(
                     "refId": "A",
                     "expr": (
                         'tags.appname:hostapd AND _msg:AP-STA-CONNECTED'
-                        ' | extract_regexp "CONNECTED (?P<mac>[0-9a-fA-F:]{17})" from _msg'
-                        + _logsql_replace_chain(mac_names)
-                        + ' | filter mac:re("$station")'
                         ' | stats by (_time:1h, tags.hostname) count() connects'
                     ),
                 }
@@ -371,8 +354,6 @@ def _build_panels(
                         'tags.appname:hostapd AND _msg:AP-STA-CONNECTED'
                         ' | extract_regexp "CONNECTED (?P<mac>[0-9a-fA-F:]{17})" from _msg'
                         ' | extract "auth_alg=<auth>" from _msg'
-                        + _logsql_replace_chain(mac_names)
-                        + ' | filter mac:re("$station")'
                         ' | fields _time, mac, tags.hostname, auth'
                     ),
                 }
