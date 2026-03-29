@@ -1,6 +1,6 @@
 import json
 import pytest
-from wifi_dethrash.dashboard import generate_dashboard
+from wifi_dethrash.dashboard import generate_dashboard, generate_dashboard_api
 from wifi_dethrash.sources.vm import APInfo
 
 
@@ -93,3 +93,111 @@ class TestDashboard:
 
         titles = [p["title"] for p in parsed["panels"]]
         assert "Usteer Thresholds" in titles
+
+
+    def test_has_thrashing_rate_panel(self):
+        aps = [APInfo(hostname="mowgli", instance="mowgli:9100")]
+        parsed = json.loads(generate_dashboard(aps))
+        titles = [p["title"] for p in parsed["panels"]]
+        assert "Thrashing Rate" in titles
+
+    def test_has_roaming_timeline_panel(self):
+        aps = [APInfo(hostname="mowgli", instance="mowgli:9100")]
+        parsed = json.loads(generate_dashboard(aps))
+        titles = [p["title"] for p in parsed["panels"]]
+        assert "Roaming Timeline" in titles
+
+    def test_has_rssi_heatmap_panel(self):
+        aps = [APInfo(hostname="mowgli", instance="mowgli:9100")]
+        parsed = json.loads(generate_dashboard(aps))
+        titles = [p["title"] for p in parsed["panels"]]
+        assert "RSSI Heatmap" in titles
+
+    def test_has_snr_distribution_panel(self):
+        aps = [APInfo(hostname="mowgli", instance="mowgli:9100")]
+        parsed = json.loads(generate_dashboard(aps))
+        titles = [p["title"] for p in parsed["panels"]]
+        assert "SNR Distribution" in titles
+
+    def test_has_usteer_effectiveness_panel(self):
+        aps = [APInfo(hostname="mowgli", instance="mowgli:9100")]
+        parsed = json.loads(generate_dashboard(aps))
+        titles = [p["title"] for p in parsed["panels"]]
+        assert "usteer Effectiveness" in titles
+
+    def test_panel_count_without_locations(self):
+        aps = [APInfo(hostname="mowgli", instance="mowgli:9100")]
+        parsed = json.loads(generate_dashboard(aps))
+        assert len(parsed["panels"]) == 11
+
+    def test_panel_count_with_locations(self):
+        aps = [APInfo(hostname="mowgli", instance="mowgli:9100")]
+        locations = {"mowgli": "-1 / Garden"}
+        parsed = json.loads(generate_dashboard(aps, ap_locations=locations))
+        assert len(parsed["panels"]) == 12
+
+    def test_topology_panel_present_with_locations(self):
+        aps = [APInfo(hostname="mowgli", instance="mowgli:9100")]
+        locations = {"mowgli": "-1 / Garden"}
+        parsed = json.loads(generate_dashboard(aps, ap_locations=locations))
+        titles = [p["title"] for p in parsed["panels"]]
+        assert "AP Topology" in titles
+
+    def test_topology_panel_absent_without_locations(self):
+        aps = [APInfo(hostname="mowgli", instance="mowgli:9100")]
+        parsed = json.loads(generate_dashboard(aps))
+        titles = [p["title"] for p in parsed["panels"]]
+        assert "AP Topology" not in titles
+
+    def test_topology_groups_by_floor(self):
+        aps = [
+            APInfo(hostname="golem", instance="golem:9100"),
+            APInfo(hostname="albert", instance="albert:9100"),
+        ]
+        locations = {
+            "golem": "Ground floor / Living room",
+            "albert": "First floor / Bedroom",
+        }
+        parsed = json.loads(generate_dashboard(aps, ap_locations=locations))
+        topo = next(p for p in parsed["panels"] if p["title"] == "AP Topology")
+        elements = topo["options"]["root"]["elements"]
+        names = [e["name"] for e in elements]
+        assert "floor-Ground floor" in names
+        assert "floor-First floor" in names
+        assert "ap-golem" in names
+        assert "ap-albert" in names
+
+
+class TestDashboardAPI:
+    def test_returns_dict_not_string(self):
+        aps = [APInfo(hostname="mowgli", instance="mowgli:9100")]
+        result = generate_dashboard_api(aps, "prom-abc", "vl-xyz")
+        assert isinstance(result, dict)
+
+    def test_has_fixed_uid(self):
+        aps = [APInfo(hostname="mowgli", instance="mowgli:9100")]
+        result = generate_dashboard_api(aps, "prom-abc", "vl-xyz")
+        assert result["uid"] == "wifi-dethrash"
+
+    def test_no_inputs_or_requires(self):
+        aps = [APInfo(hostname="mowgli", instance="mowgli:9100")]
+        result = generate_dashboard_api(aps, "prom-abc", "vl-xyz")
+        assert "__inputs" not in result
+        assert "__requires" not in result
+
+    def test_substitutes_datasource_uids(self):
+        aps = [APInfo(hostname="mowgli", instance="mowgli:9100")]
+        result = generate_dashboard_api(aps, "prom-abc", "vl-xyz")
+
+        raw = json.dumps(result)
+        assert "${DS_PROMETHEUS}" not in raw
+        assert "${DS_VICTORIALOGS}" not in raw
+        assert "prom-abc" in raw
+        assert "vl-xyz" in raw
+
+    def test_panels_match_file_import_count(self):
+        aps = [APInfo(hostname="mowgli", instance="mowgli:9100")]
+        file_parsed = json.loads(generate_dashboard(aps))
+        api_result = generate_dashboard_api(aps, "prom-abc", "vl-xyz")
+        api_panels: list[object] = api_result["panels"]  # type: ignore[assignment]
+        assert len(api_panels) == len(file_parsed["panels"])
