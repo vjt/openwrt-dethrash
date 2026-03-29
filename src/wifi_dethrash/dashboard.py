@@ -81,12 +81,27 @@ def _build_topology_panel(
     }
 
 
+def _mac_overrides(mac_names: dict[str, str]) -> list[dict[str, object]]:
+    """Build Grafana field overrides that rename MAC series to hostnames."""
+    overrides: list[dict[str, object]] = []
+    for mac, name in sorted(mac_names.items()):
+        overrides.append({
+            "matcher": {"id": "byRegexp", "options": f".*{mac}.*"},
+            "properties": [
+                {"id": "displayName", "value": f"{name} ({mac})"},
+            ],
+        })
+    return overrides
+
+
 def _build_panels(
     aps: list[APInfo],
     ap_locations: dict[str, str] | None = None,
+    mac_names: dict[str, str] | None = None,
 ) -> list[dict[str, object]]:
     """Build panel list with datasource placeholders."""
     instance_re = "|".join(a.instance for a in aps)
+    mac_ovr = _mac_overrides(mac_names) if mac_names else []
 
     panels: list[dict[str, object]] = [
         {
@@ -107,7 +122,7 @@ def _build_panels(
                     "unit": "dBm",
                     "custom": {"drawStyle": "line", "lineWidth": 1},
                 },
-                "overrides": [],
+                "overrides": mac_ovr,
             },
             "options": {},
         },
@@ -311,7 +326,7 @@ def _build_panels(
             ],
             "fieldConfig": {
                 "defaults": {"unit": "dBm"},
-                "overrides": [],
+                "overrides": mac_ovr,
             },
             "options": {
                 "calculate": True,
@@ -350,7 +365,7 @@ def _build_panels(
                         ],
                     },
                 },
-                "overrides": [],
+                "overrides": mac_ovr,
             },
             "options": {"tooltip": {"mode": "multi"}},
         },
@@ -430,7 +445,7 @@ def generate_dashboard(
 
     Output includes __inputs so the UI prompts for datasource selection.
     """
-    panels = _build_panels(aps, ap_locations=ap_locations)
+    panels = _build_panels(aps, ap_locations=ap_locations, mac_names=None)
     dashboard: dict[str, object] = {
         "__inputs": [
             {
@@ -473,12 +488,13 @@ def generate_dashboard_api(
     prometheus_uid: str,
     victorialogs_uid: str,
     ap_locations: dict[str, str] | None = None,
+    mac_names: dict[str, str] | None = None,
 ) -> dict[str, object]:
     """Generate Grafana dashboard dict for API push.
 
     Substitutes real datasource UIDs (no __inputs/__requires).
     """
-    panels = _build_panels(aps, ap_locations=ap_locations)
+    panels = _build_panels(aps, ap_locations=ap_locations, mac_names=mac_names)
     dashboard = {
         "uid": "wifi-dethrash",
         **_dashboard_shell(panels),
