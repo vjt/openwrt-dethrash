@@ -335,9 +335,6 @@ def _build_panels(
                     "refId": "A",
                     "expr": (
                         'tags.appname:hostapd AND _msg:AP-STA-CONNECTED'
-                        ' | extract_regexp "CONNECTED (?P<mac>[0-9a-fA-F:]{17})" from _msg'
-                        + _logsql_replace_chain(mac_names)
-                        + ' | filter mac:re("$station")'
                         ' | stats by (_time:1h, tags.hostname) count() connects'
                     ),
                 }
@@ -364,8 +361,7 @@ def _build_panels(
                         'tags.appname:hostapd AND _msg:AP-STA-CONNECTED'
                         ' | extract_regexp "CONNECTED (?P<mac>[0-9a-fA-F:]{17})" from _msg'
                         + _logsql_replace_chain(mac_names)
-                        + ' | filter mac:re("$station")'
-                        ' | fields _time, mac, tags.hostname'
+                        + ' | fields _time, mac, tags.hostname'
                     ),
                 }
             ],
