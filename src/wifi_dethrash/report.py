@@ -194,7 +194,6 @@ def _render_recommendations(
         table.add_column("", justify="center")
         table.add_column("Proposed", justify="right")
         table.add_column("Delta", justify="right")
-        table.add_column("Command", style="dim")
 
         for c in plan.changes:
             delta = c.proposed - c.current
@@ -206,10 +205,12 @@ def _render_recommendations(
                 "\u2192",
                 f"{c.proposed} dB",
                 Text(f"{sign}{delta}", style=delta_style),
-                f"ssh root@{c.ap} uci set wireless.{c.radio}.txpower={c.proposed}",
             )
 
         console.print(table)
+        console.print()
+        for c in plan.changes:
+            console.print(f"  ssh root@{c.ap} uci set wireless.{c.radio}.txpower={c.proposed}")
         console.print()
 
         # Impact analysis table
@@ -254,18 +255,10 @@ def _render_recommendations(
 
     if usteer_commands:
         has_recs = True
-        usteer_table = Table(title="usteer Configuration",
-                             title_style="bold blue", border_style="dim")
-        usteer_table.add_column("Command", style="bold")
-        usteer_table.add_column("Reason", style="dim")
-
+        console.print("[bold blue]usteer Configuration[/bold blue]")
         for c in usteer_commands:
-            usteer_table.add_row(
-                f"ssh root@<ap> {c.command}",
-                c.reason,
-            )
-
-        console.print(usteer_table)
+            console.print(f"  ssh root@<ap> {c.command}")
+            console.print(f"    [dim]# {c.reason}[/dim]")
         console.print()
 
     if not has_recs:
