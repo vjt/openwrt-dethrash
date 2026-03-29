@@ -109,9 +109,9 @@ def _build_panels(
     """Build panel list with datasource placeholders."""
     instance_re = "|".join(a.instance for a in aps)
 
-    rssi_expr = f'wifi_station_signal_dbm{{instance=~"{instance_re}"}}'
+    rssi_expr = f'wifi_station_signal_dbm{{instance=~"{instance_re}", mac=~"$station"}}'
     snr_expr = (
-        f'wifi_station_signal_dbm{{instance=~"{instance_re}"}}'
+        f'wifi_station_signal_dbm{{instance=~"{instance_re}", mac=~"$station"}}'
         f' - on(instance, device) group_left()'
         f' wifi_network_noise_dbm'
     )
@@ -429,8 +429,55 @@ def _build_panels(
     return panels
 
 
-def _dashboard_shell(panels: list[dict[str, object]]) -> dict[str, object]:
+def _station_variable_query() -> dict[str, object]:
+    """Build a query-based station variable (file-import, no mac_names)."""
+    return {
+        "name": "station",
+        "label": "Station",
+        "type": "query",
+        "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+        "query": "label_values(wifi_station_signal_dbm, mac)",
+        "includeAll": True,
+        "allValue": ".*",
+        "multi": False,
+        "sort": 1,
+        "refresh": 2,
+    }
+
+
+def _station_variable_custom(mac_names: dict[str, str]) -> dict[str, object]:
+    """Build a custom station variable with hostname labels (API push)."""
+    options: list[dict[str, str]] = [{"text": "All", "value": "$__all"}]
+    for mac, name in sorted(mac_names.items(), key=lambda x: x[1].lower()):
+        options.append({"text": f"{name} ({mac})", "value": mac.upper()})
+
+    # Add MACs without names (from Prometheus but not in DHCP logs)
+    return {
+        "name": "station",
+        "label": "Station",
+        "type": "custom",
+        "query": ", ".join(
+            f"{mac.upper()} : {name} ({mac})"
+            for mac, name in sorted(mac_names.items(), key=lambda x: x[1].lower())
+        ),
+        "options": options,
+        "current": {"text": "All", "value": "$__all"},
+        "includeAll": True,
+        "allValue": ".*",
+        "multi": False,
+    }
+
+
+def _dashboard_shell(
+    panels: list[dict[str, object]],
+    mac_names: dict[str, str] | None = None,
+) -> dict[str, object]:
     """Common dashboard structure shared by both formats."""
+    if mac_names:
+        variables = [_station_variable_custom(mac_names)]
+    else:
+        variables = [_station_variable_query()]
+
     return {
         "title": "WiFi Mesh Health",
         "tags": ["wifi", "openwrt", "mesh"],
@@ -441,7 +488,7 @@ def _dashboard_shell(panels: list[dict[str, object]]) -> dict[str, object]:
         "panels": panels,
         "time": {"from": "now-24h", "to": "now"},
         "refresh": "30s",
-        "templating": {"list": []},
+        "templating": {"list": variables},
         "annotations": {"list": []},
     }
 
@@ -487,7 +534,7 @@ def generate_dashboard(
         ],
         "id": None,
         "uid": None,
-        **_dashboard_shell(panels),
+        **_dashboard_shell(panels, mac_names=None),
     }
     return json.dumps(dashboard, indent=2)
 
@@ -506,7 +553,7 @@ def generate_dashboard_api(
     panels = _build_panels(aps, ap_locations=ap_locations, mac_names=mac_names)
     dashboard = {
         "uid": "wifi-dethrash",
-        **_dashboard_shell(panels),
+        **_dashboard_shell(panels, mac_names=mac_names),
     }
 
     # Replace datasource placeholders with real UIDs
