@@ -81,26 +81,24 @@ def _build_topology_panel(
     }
 
 
-def _mac_transforms(mac_names: dict[str, str]) -> list[dict[str, object]]:
-    """Build Grafana renameByRegex transformations for MAC→hostname.
+def _label_map_args(mac_names: dict[str, str]) -> str:
+    """Build label_map() arguments for MAC→hostname substitution.
 
-    Generates case-insensitive regex since Prometheus labels may have
-    uppercase MACs while DHCP logs have lowercase.
+    VictoriaMetrics MetricsQL: label_map(q, "label", "src1", "dst1", ...)
+    MACs uppercased to match Prometheus label values.
     """
-    def _ci_mac(mac: str) -> str:
-        """Make MAC regex case-insensitive: a→[aA], B→[bB]."""
-        return "".join(
-            f"[{c.lower()}{c.upper()}]" if c.isalpha() else c
-            for c in mac
-        )
-
-    return [
-        {
-            "id": "renameByRegex",
-            "options": {"regex": _ci_mac(mac), "renamePattern": name},
-        }
+    pairs = ", ".join(
+        f'"{mac.upper()}", "{name}"'
         for mac, name in sorted(mac_names.items())
-    ]
+    )
+    return f'"mac", {pairs}'
+
+
+def _wrap_label_map(expr: str, mac_names: dict[str, str] | None) -> str:
+    """Wrap a PromQL expression with label_map() if mac_names given."""
+    if not mac_names:
+        return expr
+    return f"label_map({expr}, {_label_map_args(mac_names)})"
 
 
 def _build_panels(
@@ -110,7 +108,13 @@ def _build_panels(
 ) -> list[dict[str, object]]:
     """Build panel list with datasource placeholders."""
     instance_re = "|".join(a.instance for a in aps)
-    mac_tx = _mac_transforms(mac_names) if mac_names else []
+
+    rssi_expr = f'wifi_station_signal_dbm{{instance=~"{instance_re}"}}'
+    snr_expr = (
+        f'wifi_station_signal_dbm{{instance=~"{instance_re}"}}'
+        f' - on(instance, device) group_left()'
+        f' wifi_network_noise_dbm'
+    )
 
     panels: list[dict[str, object]] = [
         {
@@ -122,7 +126,7 @@ def _build_panels(
             "targets": [
                 {
                     "refId": "A",
-                    "expr": f'wifi_station_signal_dbm{{instance=~"{instance_re}"}}',
+                    "expr": _wrap_label_map(rssi_expr, mac_names),
                     "legendFormat": "{{instance}} / {{mac}}",
                 }
             ],
@@ -134,7 +138,6 @@ def _build_panels(
                 "overrides": [],
             },
             "options": {},
-            "transformations": mac_tx,
         },
         {
             "id": 2,
@@ -330,7 +333,7 @@ def _build_panels(
             "targets": [
                 {
                     "refId": "A",
-                    "expr": f'wifi_station_signal_dbm{{instance=~"{instance_re}"}}',
+                    "expr": _wrap_label_map(rssi_expr, mac_names),
                     "legendFormat": "{{instance}} / {{mac}}",
                 }
             ],
@@ -344,7 +347,6 @@ def _build_panels(
                 "color": {"mode": "scheme", "scheme": "RdYlGn", "reverse": True},
                 "yAxis": {"unit": "dBm"},
             },
-            "transformations": mac_tx,
         },
         {
             "id": 10,
@@ -355,11 +357,7 @@ def _build_panels(
             "targets": [
                 {
                     "refId": "A",
-                    "expr": (
-                        f'wifi_station_signal_dbm{{instance=~"{instance_re}"}}'
-                        f' - on(instance, device) group_left()'
-                        f' wifi_network_noise_dbm'
-                    ),
+                    "expr": _wrap_label_map(snr_expr, mac_names),
                     "legendFormat": "{{instance}} / {{mac}}",
                 }
             ],
@@ -379,7 +377,6 @@ def _build_panels(
                 "overrides": [],
             },
             "options": {"tooltip": {"mode": "multi"}},
-            "transformations": mac_tx,
         },
         {
             "id": 11,

@@ -109,11 +109,11 @@ class TestFetchEvents:
 
 
 DHCP_RESPONSE = (
-    # Technitium format (dash-separated MAC)
-    '{"_msg":"[2026-03-29 13:44:14 UTC] DHCP Server leased IP address [192.168.42.41] to enterprise [84-2F-57-07-9E-3D] for scope: Default","tags.appname":"docker"}\n'
-    '{"_msg":"[2026-03-29 13:38:08 UTC] DHCP Server leased IP address [192.168.42.21] to tv [E0-85-4D-B3-BC-C0] for scope: Default","tags.appname":"docker"}\n'
+    # Technitium format (dash-separated MAC) — use TEST-NET IPs that won't reverse-resolve
+    '{"_msg":"[2026-03-29 13:44:14 UTC] DHCP Server leased IP address [198.51.100.41] to enterprise [84-2F-57-07-9E-3D] for scope: Default","tags.appname":"docker"}\n'
+    '{"_msg":"[2026-03-29 13:38:08 UTC] DHCP Server leased IP address [198.51.100.21] to tv [E0-85-4D-B3-BC-C0] for scope: Default","tags.appname":"docker"}\n'
     # dnsmasq format (colon-separated MAC)
-    '{"_msg":"DHCPACK(br-lan) 192.168.253.164 7e:0b:7c:b7:30:8e Watch","tags.appname":"dnsmasq-dhcp"}\n'
+    '{"_msg":"DHCPACK(br-lan) 198.51.100.164 7e:0b:7c:b7:30:8e Watch","tags.appname":"dnsmasq-dhcp"}\n'
 )
 
 

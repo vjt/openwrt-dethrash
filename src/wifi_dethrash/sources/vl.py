@@ -21,7 +21,7 @@ _DNSMASQ_DHCP_RE = re.compile(
 
 # Technitium: DHCP Server leased IP address [192.168.42.41] to enterprise [84-2F-57-07-9E-3D]
 _TECHNITIUM_DHCP_RE = re.compile(
-    r"DHCP Server leased IP address \[\S+\] to (\S+) \[([0-9a-fA-F-]{17})\]"
+    r"DHCP Server leased IP address \[(\S+)\] to (\S+) \[([0-9a-fA-F-]{17})\]"
 )
 
 
@@ -103,8 +103,12 @@ class VictoriaLogsClient:
         """Resolve MAC addresses to hostnames from DHCP logs.
 
         Parses both Technitium and dnsmasq DHCP log formats.
+        Prefers DNS reverse lookup (authoritative name) over DHCP
+        client-provided hostname when IP is available.
         Returns dict mapping lowercase colon-separated MAC to hostname.
         """
+        import socket
+
         resp = self._client.get(
             f"{self._base_url}/select/logsql/query",
             params={
@@ -119,6 +123,7 @@ class VictoriaLogsClient:
         resp.raise_for_status()
 
         names: dict[str, str] = {}
+        mac_ips: dict[str, str] = {}
         for line in resp.text.strip().split("\n"):
             if not line:
                 continue
@@ -128,12 +133,14 @@ class VictoriaLogsClient:
                 continue
             msg = row.get("_msg", "")
 
-            # Technitium: DHCP Server leased IP address [x] to hostname [AA-BB-CC-DD-EE-FF]
+            # Technitium: DHCP Server leased IP address [ip] to hostname [AA-BB-CC-DD-EE-FF]
             m = _TECHNITIUM_DHCP_RE.search(msg)
             if m:
-                hostname = m.group(1)
-                mac = m.group(2).replace("-", ":").lower()
+                ip = m.group(1)
+                hostname = m.group(2)
+                mac = m.group(3).replace("-", ":").lower()
                 names[mac] = hostname
+                mac_ips[mac] = ip
                 continue
 
             # dnsmasq: DHCPACK(br-lan) ip aa:bb:cc:dd:ee:ff hostname
@@ -142,5 +149,16 @@ class VictoriaLogsClient:
                 mac = m.group(1).lower()
                 hostname = m.group(2)
                 names[mac] = hostname
+
+        # Prefer DNS reverse lookup over DHCP client hostname
+        for mac, ip in mac_ips.items():
+            try:
+                dns_name = socket.gethostbyaddr(ip)[0]
+                # Strip domain suffix for display
+                short = dns_name.split(".")[0]
+                if short:
+                    names[mac] = short
+            except (socket.herror, OSError):
+                pass
 
         return names
