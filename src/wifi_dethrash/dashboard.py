@@ -97,12 +97,12 @@ def _label_map_args(mac_names: dict[str, str]) -> str:
 def _wrap_label_map(expr: str, mac_names: dict[str, str] | None) -> str:
     """Wrap a PromQL expression with label_map() and station filter.
 
-    With mac_names: label_match(label_map(expr, ...), "mac", "$station")
-    Without: adds mac=~"$station" selector directly.
+    Uses $station_re (hidden variable with allValue=".*") for Prometheus
+    regex matching, while VL panels use $station (allValue="*").
     """
     if mac_names:
-        return f'label_match(label_map({expr}, {_label_map_args(mac_names)}), "mac", "$station")'
-    return expr.replace("}", ', mac=~"$station"}', 1) if "}" in expr else expr
+        return f'label_match(label_map({expr}, {_label_map_args(mac_names)}), "mac", "$station_re")'
+    return expr.replace("}", ', mac=~"$station_re"}', 1) if "}" in expr else expr
 
 
 def _build_panels(
@@ -175,7 +175,7 @@ def _build_panels(
                 {
                     "refId": "A",
                     "expr": (
-                        'tags.appname:hostapd AND _msg:AP-STA-CONNECTED AND fields.station:re(${station:doublequote})'
+                        'tags.appname:hostapd AND _msg:AP-STA-CONNECTED AND fields.station:$station'
                         ' | extract "AP-STA-CONNECTED <mac> auth_alg=<auth>" from _msg'
                         ' | format "🟢 <_time> <fields.station> (<mac>) ▸ <tags.hostname> (<auth>)" as _msg'
                     ),
@@ -183,7 +183,7 @@ def _build_panels(
                 {
                     "refId": "B",
                     "expr": (
-                        'tags.appname:hostapd AND _msg:AP-STA-DISCONNECTED AND fields.station:re(${station:doublequote})'
+                        'tags.appname:hostapd AND _msg:AP-STA-DISCONNECTED AND fields.station:$station'
                         ' | extract "AP-STA-DISCONNECTED <mac>" from _msg'
                         ' | format "🔴 <_time> <fields.station> (<mac>) ◂ <tags.hostname>" as _msg'
                     ),
@@ -487,27 +487,40 @@ def _build_panels(
     return panels
 
 
-def _station_variable(mac_names: dict[str, str] | None) -> dict[str, object]:
-    """Build a station selector from Technitium reservations.
+def _station_variables(mac_names: dict[str, str] | None) -> list[dict[str, object]]:
+    """Build station selector variables.
 
-    Custom variable populated at --push-dashboard time from the same
-    Technitium source as the Go resolver. Updated by re-pushing.
+    station: visible dropdown, allValue="*" for VL (LogsQL field:* = exists)
+    station_re: hidden, same list, allValue=".*" for Prometheus regex
+    User selects from one dropdown, both update to the same value.
     """
     names = sorted(set(mac_names.values()), key=str.lower) if mac_names else []
-    return {
-        "name": "station",
-        "label": "Station",
-        "type": "custom",
-        "query": ",".join(names),
-        "includeAll": True,
-        "allValue": ".*",
-        "multi": False,
-    }
+    query = ",".join(names)
+    return [
+        {
+            "name": "station",
+            "label": "Station",
+            "type": "custom",
+            "query": query,
+            "includeAll": True,
+            "allValue": "*",
+            "multi": False,
+        },
+        {
+            "name": "station_re",
+            "type": "custom",
+            "query": query,
+            "includeAll": True,
+            "allValue": ".*",
+            "multi": False,
+            "hide": 2,
+        },
+    ]
 
 
 def _dashboard_shell(panels: list[dict[str, object]], mac_names: dict[str, str] | None = None) -> dict[str, object]:
     """Common dashboard structure shared by both formats."""
-    variables = [_station_variable(mac_names)]
+    variables = _station_variables(mac_names)
 
     return {
         "title": "WiFi Mesh Health",
