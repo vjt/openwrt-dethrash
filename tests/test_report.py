@@ -34,7 +34,8 @@ class TestReport:
             overlap_pct=34,
             avg_rssi_a=-52,
             avg_rssi_b=-55,
-            louder_ap="golem",
+            target_ap="golem",
+            action="reduce",
         )]
         output = render_report(
             thrash=[], overlap=[], weak=[],
@@ -42,7 +43,7 @@ class TestReport:
         )
         assert "golem <-> pingu" in output
         assert "CRITICAL" in output
-        assert "Consider reducing txpower on golem" in output
+        assert "adjusting txpower on golem" in output
         assert "-52" in output
         assert "-55" in output
 
@@ -56,10 +57,11 @@ class TestReport:
             overlap_pct=34,
             avg_rssi_a=-52,
             avg_rssi_b=-55,
-            louder_ap="golem",
+            target_ap="golem",
+            action="reduce",
             current_txpower_a=23,
             current_txpower_b=20,
-            suggested_txpower=18,
+            suggested_txpower=21,
         )]
         output = render_report(
             thrash=[], overlap=[], weak=[],
@@ -67,8 +69,8 @@ class TestReport:
         )
         assert "txpower 23 dBm" in output
         assert "txpower 20 dBm" in output
-        assert "23 -> 18 dBm" in output
-        assert "uci set wireless.radio1.txpower=18" in output
+        assert "23 -> 21 dBm" in output
+        assert "uci set wireless.radio1.txpower=21" in output
 
     def test_includes_usteer_commands(self):
         commands = [UCICommand(

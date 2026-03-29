@@ -102,12 +102,13 @@ def render_report(
             lines.append(f"     {r.ap_pair[0]}: {a_info} | {r.ap_pair[1]}: {b_info}")
 
             if r.suggested_txpower is not None:
-                louder_txp = r.current_txpower_a if r.louder_ap == r.ap_pair[0] else r.current_txpower_b
+                target_txp = r.current_txpower_a if r.target_ap == r.ap_pair[0] else r.current_txpower_b
+                verb = "Reduce" if r.action == "reduce" else "Increase"
                 lines.append(
-                    f"     -> Reduce {r.louder_ap} {r.radio} txpower: {louder_txp} -> {r.suggested_txpower} dBm"
+                    f"     -> {verb} {r.target_ap} {r.radio} txpower: {target_txp} -> {r.suggested_txpower} dBm"
                 )
                 lines.append(
-                    f"        ssh root@{r.louder_ap} uci set wireless.{r.radio}.txpower={r.suggested_txpower}"
+                    f"        ssh root@{r.target_ap} uci set wireless.{r.radio}.txpower={r.suggested_txpower}"
                 )
             elif r.skip_reason:
                 lines.append(
@@ -115,7 +116,7 @@ def render_report(
                 )
             else:
                 lines.append(
-                    f"     -> Consider reducing txpower on {r.louder_ap} ({r.radio})"
+                    f"     -> Consider adjusting txpower on {r.target_ap} ({r.radio})"
                 )
             lines.append("")
 

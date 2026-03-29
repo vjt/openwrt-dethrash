@@ -3,7 +3,7 @@ from wifi_dethrash.recommender import Recommender, TxPowerRecommendation, UCICom
 from wifi_dethrash.analyzers.thrashing import ThrashSequence
 from wifi_dethrash.analyzers.overlap import OverlapResult
 from wifi_dethrash.analyzers.weak import WeakAssociation
-from wifi_dethrash.sources.vm import NoiseReading, TxPowerReading
+from wifi_dethrash.sources.vm import TxPowerReading
 
 
 class TestTxPowerRecommendation:
@@ -38,7 +38,7 @@ class TestTxPowerRecommendation:
         assert r.total_thrash_episodes == 1
         assert r.avg_rssi_diff == 3.0
         # golem is louder (-52 > -55)
-        assert r.louder_ap == "golem"
+        assert r.target_ap == "golem"
 
     def test_identifies_louder_ap(self):
         """Should recommend reducing power on the AP with stronger signal."""
@@ -65,7 +65,7 @@ class TestTxPowerRecommendation:
         recs = rec.txpower_recommendations(thrash, overlap)
 
         assert len(recs) == 1
-        assert recs[0].louder_ap == "pingu"
+        assert recs[0].target_ap == "pingu"
 
     def test_aggregates_thrash_episodes(self):
         """Multiple episodes for same pair should be aggregated."""
@@ -186,7 +186,7 @@ class TestTxPowerRecommendation:
 
         assert len(recs) == 1
         r = recs[0]
-        assert r.louder_ap == "golem"
+        assert r.target_ap == "golem"
         assert r.current_txpower_a == 23
         assert r.current_txpower_b == 20
         assert r.suggested_txpower is not None
@@ -223,8 +223,8 @@ class TestTxPowerRecommendation:
 
         assert recs[0].suggested_txpower == 5
 
-    def test_skips_when_rssi_below_floor(self):
-        """Should not suggest reduction when RSSI is already weak."""
+    def test_suggests_increase_when_rssi_below_floor(self):
+        """When RSSI is weak, should suggest increasing the quieter AP."""
         thrash = [ThrashSequence(
             mac="aa:bb:cc:dd:ee:01",
             ap_pair=("albert", "pingu"),
@@ -254,9 +254,11 @@ class TestTxPowerRecommendation:
         recs = rec.txpower_recommendations(thrash, overlap, txpower=txpower)
 
         assert len(recs) == 1
-        assert recs[0].suggested_txpower is None
-        assert recs[0].skip_reason is not None
-        assert "-75" in recs[0].skip_reason
+        r = recs[0]
+        assert r.action == "increase"
+        # albert is quieter (-84 vs -83), increase its txpower
+        assert r.target_ap == "albert"
+        assert r.suggested_txpower == 21  # 19 + 2
 
     def test_prefers_higher_txpower_ap(self):
         """Should reduce the AP with higher txpower (more headroom)."""
@@ -290,7 +292,7 @@ class TestTxPowerRecommendation:
 
         assert len(recs) == 1
         # pingu has higher txpower (22 vs 16), reduce that one
-        assert recs[0].louder_ap == "pingu"
+        assert recs[0].target_ap == "pingu"
         assert recs[0].suggested_txpower == 20
 
     def test_no_txpower_data_gives_none(self):
@@ -342,62 +344,49 @@ class TestUsteerRecommendation:
             ifname_a="phy1-ap0",
             ifname_b="phy1-ap0",
         )]
-        noise = [NoiseReading(ap="golem", radio="radio1", frequency=5500,
-                              noise_dbm=-92, timestamp=1000)]
-        weak = [WeakAssociation(mac="aa:bb:cc:dd:ee:01", ap="pingu",
-                                avg_snr=8, sample_count=100)]
 
         rec = Recommender()
-        commands = rec.usteer_commands(weak, overlap, noise, thrash)
+        commands = rec.usteer_commands(overlap, thrash)
 
-        sig_diff = [c for c in commands if "signal_diff" in c.command]
-        assert len(sig_diff) == 1
+        assert len(commands) == 1
         # max diff 4.2, int(4.2) + 3 = 7
-        assert "signal_diff_threshold=7" in sig_diff[0].command
+        assert "signal_diff_threshold=7" in commands[0].command
 
-    def test_min_snr_from_weak_data(self):
-        """min_connect_snr/min_snr should be derived from weak associations."""
-        thrash: list[ThrashSequence] = []
-        overlap: list[OverlapResult] = []
-        noise = [NoiseReading(ap="golem", radio="radio1", frequency=5500,
-                              noise_dbm=-92, timestamp=1000)]
-        weak = [
-            WeakAssociation(mac="aa:bb:cc:dd:ee:01", ap="pingu",
-                            avg_snr=3, sample_count=100),
-            WeakAssociation(mac="aa:bb:cc:dd:ee:02", ap="golem",
-                            avg_snr=10, sample_count=50),
-        ]
-
-        rec = Recommender()
-        commands = rec.usteer_commands(weak, overlap, noise, thrash)
-
-        connect = [c for c in commands if "min_connect_snr" in c.command]
-        snr = [c for c in commands if c.command.endswith("min_snr=8") or
-               "usteer[0].min_snr=" in c.command and "connect" not in c.command]
-        assert len(connect) == 1
-        # worst functional = 3, +2 = 5, but clamped to min 8
-        assert "min_connect_snr=8" in connect[0].command
-
-    def test_roam_thresholds_from_noise(self):
-        """roam_scan/trigger_snr should be included when noise data exists."""
-        noise = [
-            NoiseReading(ap="golem", radio="radio1", frequency=5500,
-                         noise_dbm=-92, timestamp=1000),
-            NoiseReading(ap="pingu", radio="radio1", frequency=5180,
-                         noise_dbm=-91, timestamp=1000),
-        ]
-        weak = [WeakAssociation(mac="aa:bb:cc:dd:ee:01", ap="pingu",
-                                avg_snr=8, sample_count=100)]
+    def test_no_snr_kicking_recommended(self):
+        """Should never recommend min_snr or min_connect_snr kicking."""
+        thrash = [ThrashSequence(
+            mac="aa:bb:cc:dd:ee:01",
+            ap_pair=("golem", "pingu"),
+            count=50,
+            first_time="T1",
+            last_time="T2",
+        )]
+        overlap = [OverlapResult(
+            mac="aa:bb:cc:dd:ee:01",
+            ap_pair=("golem", "pingu"),
+            rssi_diff=3.0,
+            overlap_count=100,
+            total_samples=120,
+            avg_rssi_a=-52,
+            avg_rssi_b=-55,
+            ifname_a="phy1-ap0",
+            ifname_b="phy1-ap0",
+        )]
 
         rec = Recommender()
-        commands = rec.usteer_commands(weak, [], noise, [])
+        commands = rec.usteer_commands(overlap, thrash)
 
-        roam_scan = [c for c in commands if "roam_scan_snr" in c.command]
-        roam_trigger = [c for c in commands if "roam_trigger_snr" in c.command]
-        assert len(roam_scan) == 1
-        assert "roam_scan_snr=25" in roam_scan[0].command
-        assert len(roam_trigger) == 1
-        assert "roam_trigger_snr=15" in roam_trigger[0].command
+        for c in commands:
+            assert "min_snr" not in c.command
+            assert "min_connect_snr" not in c.command
+            assert "roam_scan" not in c.command
+            assert "roam_trigger" not in c.command
+
+    def test_no_thrashing_no_usteer(self):
+        """Without thrashing data, no usteer commands should be generated."""
+        rec = Recommender()
+        commands = rec.usteer_commands([], [])
+        assert commands == []
 
 
 class TestUCICommand:
