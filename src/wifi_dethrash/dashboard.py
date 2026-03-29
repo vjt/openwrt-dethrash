@@ -490,32 +490,18 @@ def _build_panels(
 def _station_variable(mac_names: dict[str, str] | None) -> dict[str, object]:
     """Build a station selector from Technitium reservations.
 
-    Custom variable with hostname list — updated on each --push-dashboard.
-    Falls back to Prometheus label_values for file-import format.
+    Custom variable populated at --push-dashboard time from the same
+    Technitium source as the Go resolver. Updated by re-pushing.
     """
-    if mac_names:
-        names = sorted(set(mac_names.values()), key=str.lower)
-        return {
-            "name": "station",
-            "label": "Station",
-            "type": "custom",
-            "query": ",".join(names),
-            "includeAll": True,
-            "allValue": ".*",
-            "multi": False,
-        }
-
+    names = sorted(set(mac_names.values()), key=str.lower) if mac_names else []
     return {
         "name": "station",
         "label": "Station",
-        "type": "query",
-        "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
-        "query": "label_values(wifi_station_signal_dbm, mac)",
+        "type": "custom",
+        "query": ",".join(names),
         "includeAll": True,
         "allValue": ".*",
         "multi": False,
-        "sort": 1,
-        "refresh": 2,
     }
 
 
