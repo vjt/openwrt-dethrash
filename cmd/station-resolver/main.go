@@ -17,6 +17,7 @@ import (
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"strings"
 	"sync"
@@ -25,10 +26,13 @@ import (
 
 // Config from environment variables.
 var (
-	technitiumURL   = envOrDefault("TECHNITIUM_URL", "https://ns1.bad.ass")
-	technitiumToken = envOrDefault("TECHNITIUM_TOKEN", "")
-	dhcpScope       = envOrDefault("DHCP_SCOPE", "Default")
-	refreshInterval = envOrDefault("REFRESH_INTERVAL", "5m")
+	technitiumURL    = envOrDefault("TECHNITIUM_URL", "https://ns1.bad.ass")
+	technitiumToken  = envOrDefault("TECHNITIUM_TOKEN", "")
+	dhcpScope        = envOrDefault("DHCP_SCOPE", "Default")
+	refreshInterval  = envOrDefault("REFRESH_INTERVAL", "1m")
+	victoriaLogsURL  = envOrDefault("VICTORIALOGS_URL", "")
+	backfillInterval = envOrDefault("BACKFILL_INTERVAL", "1m")
+	backfillWindow   = envOrDefault("BACKFILL_WINDOW", "5m")
 )
 
 func envOrDefault(key, def string) string {
@@ -44,20 +48,31 @@ type resolver struct {
 	names map[string]string // lowercase colon-separated MAC → hostname
 }
 
-// technitiumResponse is the API response for /api/dhcp/scopes/get.
-type technitiumResponse struct {
+// lease represents a DHCP lease entry from Technitium.
+type lease struct {
+	HardwareAddress string `json:"hardwareAddress"`
+	HostName        string `json:"hostName"`
+	Type            string `json:"type"` // "Reserved" or "Dynamic"
+}
+
+// scopeResponse is the API response for /api/dhcp/scopes/get (reserved leases).
+type scopeResponse struct {
 	Status   string `json:"status"`
 	Response struct {
-		ReservedLeases []struct {
-			HardwareAddress string `json:"hardwareAddress"`
-			HostName        string `json:"hostName"`
-		} `json:"reservedLeases"`
+		ReservedLeases []lease `json:"reservedLeases"`
 	} `json:"response"`
 }
 
-func (r *resolver) refresh() error {
-	url := fmt.Sprintf("%s/api/dhcp/scopes/get?token=%s&name=%s",
-		technitiumURL, technitiumToken, dhcpScope)
+// leasesResponse is the API response for /api/dhcp/leases/list (active leases).
+type leasesResponse struct {
+	Status   string `json:"status"`
+	Response struct {
+		Leases []lease `json:"leases"`
+	} `json:"response"`
+}
+
+func (r *resolver) apiGet(path string, result any) error {
+	url := fmt.Sprintf("%s%s?token=%s&name=%s", technitiumURL, path, technitiumToken, dhcpScope)
 
 	client := &http.Client{
 		Timeout: 10 * time.Second,
@@ -68,7 +83,7 @@ func (r *resolver) refresh() error {
 
 	resp, err := client.Get(url)
 	if err != nil {
-		return fmt.Errorf("technitium API: %w", err)
+		return fmt.Errorf("technitium API %s: %w", path, err)
 	}
 	defer resp.Body.Close()
 
@@ -77,22 +92,49 @@ func (r *resolver) refresh() error {
 		return fmt.Errorf("reading response: %w", err)
 	}
 
-	var data technitiumResponse
-	if err := json.Unmarshal(body, &data); err != nil {
-		return fmt.Errorf("parsing JSON: %w", err)
+	return json.Unmarshal(body, result)
+}
+
+func normalizeLease(l lease) (mac, host string) {
+	mac = strings.ToLower(strings.ReplaceAll(l.HardwareAddress, "-", ":"))
+	host = l.HostName
+	if idx := strings.Index(host, "."); idx > 0 {
+		host = host[:idx]
+	}
+	return
+}
+
+func (r *resolver) refresh() error {
+	// 1. Reserved leases (static reservations — authoritative names)
+	var scope scopeResponse
+	if err := r.apiGet("/api/dhcp/scopes/get", &scope); err != nil {
+		return err
+	}
+	if scope.Status != "ok" {
+		return fmt.Errorf("scopes API status: %s", scope.Status)
 	}
 
-	if data.Status != "ok" {
-		return fmt.Errorf("API status: %s", data.Status)
+	// 2. Active leases (dynamic — guests, new devices)
+	var active leasesResponse
+	if err := r.apiGet("/api/dhcp/leases/list", &active); err != nil {
+		log.Printf("warning: could not fetch active leases: %v", err)
+		// Non-fatal — reserved leases are enough
 	}
 
-	names := make(map[string]string, len(data.Response.ReservedLeases))
-	for _, lease := range data.Response.ReservedLeases {
-		mac := strings.ToLower(strings.ReplaceAll(lease.HardwareAddress, "-", ":"))
-		host := lease.HostName
-		// Strip domain suffix
-		if idx := strings.Index(host, "."); idx > 0 {
-			host = host[:idx]
+	// Dynamic leases first, then reserved override (reserved wins)
+	names := make(map[string]string)
+	if active.Status == "ok" {
+		for _, l := range active.Response.Leases {
+			mac, host := normalizeLease(l)
+			if host != "" {
+				names[mac] = host
+			}
+		}
+	}
+	for _, l := range scope.Response.ReservedLeases {
+		mac, host := normalizeLease(l)
+		if host != "" {
+			names[mac] = host
 		}
 		names[mac] = host
 	}
@@ -117,6 +159,104 @@ func (r *resolver) runRefreshLoop(interval time.Duration) {
 		if err := r.refresh(); err != nil {
 			log.Printf("refresh error: %v", err)
 		}
+	}
+}
+
+// backfillEntry is a VictoriaLogs log entry for backfilling.
+type backfillEntry map[string]any
+
+func (r *resolver) runBackfillLoop(interval time.Duration, window string) {
+	if victoriaLogsURL == "" {
+		log.Printf("VICTORIALOGS_URL not set, backfill disabled")
+		return
+	}
+
+	client := &http.Client{
+		Timeout: 30 * time.Second,
+		Transport: &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: false},
+		},
+	}
+
+	for {
+		time.Sleep(interval)
+		r.backfill(client, window)
+	}
+}
+
+func (r *resolver) backfill(client *http.Client, window string) {
+	// Query un-enriched hostapd events in the recent window
+	query := fmt.Sprintf(
+		"tags.appname:hostapd AND (_msg:AP-STA-CONNECTED OR _msg:AP-STA-DISCONNECTED) AND NOT fields.station:* | _time:%s",
+		window,
+	)
+
+	resp, err := client.Get(fmt.Sprintf("%s/select/logsql/query?query=%s&limit=1000",
+		victoriaLogsURL, url.QueryEscape(query)))
+	if err != nil {
+		log.Printf("backfill query error: %v", err)
+		return
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		log.Printf("backfill read error: %v", err)
+		return
+	}
+
+	lines := strings.Split(strings.TrimSpace(string(body)), "\n")
+	var enriched int
+
+	for _, line := range lines {
+		if line == "" {
+			continue
+		}
+
+		var entry backfillEntry
+		if err := json.Unmarshal([]byte(line), &entry); err != nil {
+			continue
+		}
+
+		msg, _ := entry["_msg"].(string)
+		mac := extractMAC(msg)
+		if mac == "" {
+			continue
+		}
+
+		name := r.lookup(mac)
+		if name == "" {
+			continue
+		}
+
+		// Add station field and re-insert
+		entry["fields.station"] = name
+
+		enrichedJSON, err := json.Marshal(entry)
+		if err != nil {
+			continue
+		}
+
+		insertURL := fmt.Sprintf("%s/insert/jsonline?_stream_fields=tags.appname,tags.hostname&_msg_field=_msg&_time_field=_time",
+			victoriaLogsURL)
+		insertResp, err := client.Post(insertURL, "application/json", strings.NewReader(string(enrichedJSON)+"\n"))
+		if err != nil {
+			log.Printf("backfill insert error: %v", err)
+			continue
+		}
+		insertResp.Body.Close()
+		enriched++
+	}
+
+	if enriched > 0 {
+		// Delete the un-enriched originals
+		deleteURL := fmt.Sprintf("%s/delete?query=%s",
+			victoriaLogsURL, url.QueryEscape(query))
+		req, _ := http.NewRequest("POST", deleteURL, nil)
+		if deleteResp, err := client.Do(req); err == nil {
+			deleteResp.Body.Close()
+		}
+		log.Printf("backfilled %d events with station names", enriched)
 	}
 }
 
@@ -207,6 +347,12 @@ func main() {
 	}
 
 	go r.runRefreshLoop(interval)
+
+	bfInterval, err := time.ParseDuration(backfillInterval)
+	if err != nil {
+		log.Fatalf("invalid BACKFILL_INTERVAL: %v", err)
+	}
+	go r.runBackfillLoop(bfInterval, backfillWindow)
 
 	scanner := bufio.NewScanner(os.Stdin)
 	// Increase buffer for long lines
