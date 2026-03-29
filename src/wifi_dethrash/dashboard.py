@@ -327,32 +327,8 @@ def _build_panels(
         {
             "id": 7,
             "title": "Connects per Hour",
-            "type": "timeseries",
+            "type": "barchart",
             "gridPos": {"h": 8, "w": 24, "x": 0, "y": 34},
-            "datasource": {"type": "victoriametrics-logs-datasource", "uid": "${DS_VICTORIALOGS}"},
-            "targets": [
-                {
-                    "refId": "A",
-                    "expr": (
-                        'tags.appname:hostapd AND _msg:AP-STA-CONNECTED'
-                        ' | stats by (_time:1h, tags.hostname) count() connects'
-                    ),
-                }
-            ],
-            "fieldConfig": {
-                "defaults": {
-                    "unit": "short",
-                    "custom": {"drawStyle": "bars", "fillOpacity": 30, "stacking": {"mode": "normal"}},
-                },
-                "overrides": [],
-            },
-            "options": {"tooltip": {"mode": "multi"}},
-        },
-        {
-            "id": 8,
-            "title": "Roaming Timeline",
-            "type": "state-timeline",
-            "gridPos": {"h": 10, "w": 24, "x": 0, "y": 42},
             "datasource": {"type": "victoriametrics-logs-datasource", "uid": "${DS_VICTORIALOGS}"},
             "targets": [
                 {
@@ -361,18 +337,65 @@ def _build_panels(
                         'tags.appname:hostapd AND _msg:AP-STA-CONNECTED'
                         ' | extract_regexp "CONNECTED (?P<mac>[0-9a-fA-F:]{17})" from _msg'
                         + _logsql_replace_chain(mac_names)
-                        + ' | fields _time, mac, tags.hostname'
+                        + ' | filter mac:re("$station")'
+                        ' | stats by (_time:1h, tags.hostname) count() connects'
+                    ),
+                }
+            ],
+            "fieldConfig": {
+                "defaults": {
+                    "unit": "short",
+                },
+                "overrides": [],
+            },
+            "options": {
+                "stacking": "normal",
+                "tooltip": {"mode": "multi"},
+            },
+            "transformations": [
+                {"id": "convertFieldType", "options": {
+                    "conversions": [{"targetField": "connects", "destinationType": "number"}],
+                }},
+            ],
+        },
+        {
+            "id": 8,
+            "title": "Roaming Events",
+            "type": "table",
+            "gridPos": {"h": 10, "w": 24, "x": 0, "y": 42},
+            "datasource": {"type": "victoriametrics-logs-datasource", "uid": "${DS_VICTORIALOGS}"},
+            "targets": [
+                {
+                    "refId": "A",
+                    "expr": (
+                        'tags.appname:hostapd AND _msg:AP-STA-CONNECTED'
+                        ' | extract_regexp "CONNECTED (?P<mac>[0-9a-fA-F:]{17})" from _msg'
+                        ' | extract "auth_alg=<auth>" from _msg'
+                        + _logsql_replace_chain(mac_names)
+                        + ' | filter mac:re("$station")'
+                        ' | fields _time, mac, tags.hostname, auth'
                     ),
                 }
             ],
             "fieldConfig": {
                 "defaults": {},
-                "overrides": [],
+                "overrides": [
+                    {"matcher": {"id": "byName", "options": "_time"}, "properties": [
+                        {"id": "displayName", "value": "Time"},
+                    ]},
+                    {"matcher": {"id": "byName", "options": "mac"}, "properties": [
+                        {"id": "displayName", "value": "Station"},
+                    ]},
+                    {"matcher": {"id": "byName", "options": "tags.hostname"}, "properties": [
+                        {"id": "displayName", "value": "AP"},
+                    ]},
+                    {"matcher": {"id": "byName", "options": "auth"}, "properties": [
+                        {"id": "displayName", "value": "Auth"},
+                    ]},
+                ],
             },
             "options": {
-                "mergeValues": True,
-                "showValue": "auto",
-                "alignValue": "left",
+                "sortBy": [{"displayName": "Time", "desc": True}],
             },
         },
         {

@@ -105,7 +105,7 @@ class TestDashboard:
         aps = [APInfo(hostname="mowgli", instance="mowgli:9100")]
         parsed = json.loads(generate_dashboard(aps))
         titles = [p["title"] for p in parsed["panels"]]
-        assert "Roaming Timeline" in titles
+        assert "Roaming Events" in titles
 
     def test_has_rssi_heatmap_panel(self):
         aps = [APInfo(hostname="mowgli", instance="mowgli:9100")]
