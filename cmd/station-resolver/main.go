@@ -249,8 +249,8 @@ func (r *resolver) backfill(client *http.Client, window string) {
 	}
 
 	if enriched > 0 {
-		// Delete the un-enriched originals
-		deleteURL := fmt.Sprintf("%s/delete?query=%s",
+		// Delete the un-enriched originals via async task
+		deleteURL := fmt.Sprintf("%s/delete/run_task?filter=%s",
 			victoriaLogsURL, url.QueryEscape(query))
 		req, _ := http.NewRequest("POST", deleteURL, nil)
 		if deleteResp, err := client.Do(req); err == nil {
