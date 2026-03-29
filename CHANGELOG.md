@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.0 — 2026-03-29
 
 ### Added
 - **Config file** (`~/.config/wifi-dethrash/config.toml`) — TOML config for
@@ -9,9 +9,13 @@
 - **Grafana API client** — `--push-dashboard` pushes dashboard directly via
   Grafana API using service account token. Discovers datasource UIDs
   automatically. `--generate-dashboard` kept for file export.
+- **Grafana annotations** — `--annotate` marks config changes as vertical
+  lines on dashboard panels for before/after comparison.
 - **SSID-based AP filtering** — `mesh_ssids` config (or `--mesh-ssids` CLI)
   filters APs to only those broadcasting configured SSIDs. Non-mesh APs
   (e.g. jeeves with 5G backup) automatically excluded.
+- **MAC address resolution** — resolves MACs to hostnames from DHCP logs
+  (Technitium and dnsmasq formats). Names shown in all report tables.
 - **5 new Grafana panels**: thrashing rate (connects/hour per AP), roaming
   timeline (state-timeline per MAC), RSSI heatmap, SNR distribution with
   threshold bands, usteer effectiveness (ft vs open auth_alg ratio).

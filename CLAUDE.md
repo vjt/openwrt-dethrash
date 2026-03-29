@@ -31,7 +31,7 @@ openwrt/
     wifi_dethrash.lua  # Prometheus collector deployed on OpenWrt APs
 tests/
   conftest.py         # respx mock fixture
-  test_*.py           # One test file per module (93 tests)
+  test_*.py           # One test file per module (99 tests)
 ```
 
 ## Engineering Standards
@@ -96,7 +96,7 @@ tests/
 ## Commands
 
 ```bash
-.venv/bin/pytest -v              # run tests (93 tests, ~0.6s)
+.venv/bin/pytest -v              # run tests (99 tests, ~0.6s)
 .venv/bin/pyright src/ tests/    # type check (zero errors)
 .venv/bin/wifi-dethrash --help   # CLI help
 ```
