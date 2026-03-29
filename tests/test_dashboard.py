@@ -92,14 +92,14 @@ class TestDashboard:
         parsed = json.loads(generate_dashboard(aps))
 
         titles = [p["title"] for p in parsed["panels"]]
-        assert "Usteer Thresholds" in titles
+        assert "usteer Config" in titles
 
 
     def test_has_thrashing_rate_panel(self):
         aps = [APInfo(hostname="mowgli", instance="mowgli:9100")]
         parsed = json.loads(generate_dashboard(aps))
         titles = [p["title"] for p in parsed["panels"]]
-        assert "Thrashing Rate" in titles
+        assert "Connects per Hour" in titles
 
     def test_has_roaming_timeline_panel(self):
         aps = [APInfo(hostname="mowgli", instance="mowgli:9100")]

@@ -289,26 +289,44 @@ def _build_panels(
         },
         {
             "id": 6,
-            "title": "Usteer Thresholds",
+            "title": "usteer Config",
             "type": "stat",
             "gridPos": {"h": 4, "w": 24, "x": 0, "y": 30},
             "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
             "targets": [
-                {"refId": "A", "expr": "wifi_usteer_min_connect_snr", "legendFormat": "min_connect_snr"},
-                {"refId": "B", "expr": "wifi_usteer_min_snr", "legendFormat": "min_snr"},
-                {"refId": "C", "expr": "wifi_usteer_roam_scan_snr", "legendFormat": "roam_scan_snr"},
-                {"refId": "D", "expr": "wifi_usteer_roam_trigger_snr", "legendFormat": "roam_trigger_snr"},
-                {"refId": "E", "expr": "wifi_usteer_signal_diff_threshold", "legendFormat": "signal_diff"},
+                {
+                    "refId": "A",
+                    "expr": "avg(wifi_usteer_signal_diff_threshold)",
+                    "legendFormat": "signal_diff",
+                },
+                {
+                    "refId": "B",
+                    "expr": "avg(wifi_usteer_roam_scan_snr)",
+                    "legendFormat": "roam_scan_snr",
+                },
             ],
             "fieldConfig": {
-                "defaults": {"unit": "dB"},
+                "defaults": {
+                    "unit": "dB",
+                    "thresholds": {
+                        "mode": "absolute",
+                        "steps": [
+                            {"color": "blue", "value": None},
+                        ],
+                    },
+                },
                 "overrides": [],
             },
-            "options": {"textMode": "value_and_name", "colorMode": "background"},
+            "options": {
+                "textMode": "value_and_name",
+                "colorMode": "background",
+                "graphMode": "none",
+                "reduceOptions": {"calcs": ["lastNotNull"]},
+            },
         },
         {
             "id": 7,
-            "title": "Thrashing Rate",
+            "title": "Connects per Hour",
             "type": "timeseries",
             "gridPos": {"h": 8, "w": 24, "x": 0, "y": 34},
             "datasource": {"type": "victoriametrics-logs-datasource", "uid": "${DS_VICTORIALOGS}"},
@@ -317,15 +335,17 @@ def _build_panels(
                     "refId": "A",
                     "expr": (
                         'tags.appname:hostapd AND _msg:AP-STA-CONNECTED'
-                        ' | stats by (tags.hostname) count() connects'
+                        ' | extract_regexp "CONNECTED (?P<mac>[0-9a-fA-F:]{17})" from _msg'
+                        + _logsql_replace_chain(mac_names)
+                        + ' | filter mac:re("$station")'
+                        ' | stats by (_time:1h, tags.hostname) count() connects'
                     ),
                 }
             ],
             "fieldConfig": {
                 "defaults": {
                     "unit": "short",
-                    "custom": {"drawStyle": "bars", "fillOpacity": 30},
-                    "displayName": "${__field.labels.tags.hostname}",
+                    "custom": {"drawStyle": "bars", "fillOpacity": 30, "stacking": {"mode": "normal"}},
                 },
                 "overrides": [],
             },
@@ -335,15 +355,17 @@ def _build_panels(
             "id": 8,
             "title": "Roaming Timeline",
             "type": "state-timeline",
-            "gridPos": {"h": 8, "w": 24, "x": 0, "y": 42},
+            "gridPos": {"h": 10, "w": 24, "x": 0, "y": 42},
             "datasource": {"type": "victoriametrics-logs-datasource", "uid": "${DS_VICTORIALOGS}"},
             "targets": [
                 {
                     "refId": "A",
                     "expr": (
                         'tags.appname:hostapd AND _msg:AP-STA-CONNECTED'
-                        ' | extract "AP-STA-CONNECTED <mac>" from _msg'
-                        ' | stats by (mac, tags.hostname) count() connects'
+                        ' | extract_regexp "CONNECTED (?P<mac>[0-9a-fA-F:]{17})" from _msg'
+                        + _logsql_replace_chain(mac_names)
+                        + ' | filter mac:re("$station")'
+                        ' | fields _time, mac, tags.hostname'
                     ),
                 }
             ],
