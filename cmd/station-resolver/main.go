@@ -17,7 +17,6 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"net/url"
 	"os"
 	"strings"
 	"sync"
@@ -26,13 +25,10 @@ import (
 
 // Config from environment variables.
 var (
-	technitiumURL    = envOrDefault("TECHNITIUM_URL", "https://ns1.bad.ass")
-	technitiumToken  = envOrDefault("TECHNITIUM_TOKEN", "")
-	dhcpScope        = envOrDefault("DHCP_SCOPE", "Default")
-	refreshInterval  = envOrDefault("REFRESH_INTERVAL", "1m")
-	victoriaLogsURL  = envOrDefault("VICTORIALOGS_URL", "")
-	backfillInterval = envOrDefault("BACKFILL_INTERVAL", "1m")
-	backfillWindow   = envOrDefault("BACKFILL_WINDOW", "5m")
+	technitiumURL   = envOrDefault("TECHNITIUM_URL", "https://ns1.bad.ass")
+	technitiumToken = envOrDefault("TECHNITIUM_TOKEN", "")
+	dhcpScope       = envOrDefault("DHCP_SCOPE", "Default")
+	refreshInterval = envOrDefault("REFRESH_INTERVAL", "1m")
 )
 
 func envOrDefault(key, def string) string {
@@ -162,103 +158,6 @@ func (r *resolver) runRefreshLoop(interval time.Duration) {
 	}
 }
 
-// backfillEntry is a VictoriaLogs log entry for backfilling.
-type backfillEntry map[string]any
-
-func (r *resolver) runBackfillLoop(interval time.Duration, window string) {
-	if victoriaLogsURL == "" {
-		log.Printf("VICTORIALOGS_URL not set, backfill disabled")
-		return
-	}
-
-	client := &http.Client{
-		Timeout: 30 * time.Second,
-		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: false},
-		},
-	}
-
-	for {
-		time.Sleep(interval)
-		r.backfill(client, window)
-	}
-}
-
-func (r *resolver) backfill(client *http.Client, window string) {
-	// Query un-enriched hostapd events in the recent window
-	query := fmt.Sprintf(
-		"tags.appname:hostapd AND (_msg:AP-STA-CONNECTED OR _msg:AP-STA-DISCONNECTED) AND NOT fields.station:* | _time:%s",
-		window,
-	)
-
-	resp, err := client.Get(fmt.Sprintf("%s/select/logsql/query?query=%s&limit=1000",
-		victoriaLogsURL, url.QueryEscape(query)))
-	if err != nil {
-		log.Printf("backfill query error: %v", err)
-		return
-	}
-	defer resp.Body.Close()
-
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		log.Printf("backfill read error: %v", err)
-		return
-	}
-
-	lines := strings.Split(strings.TrimSpace(string(body)), "\n")
-	var enriched int
-
-	for _, line := range lines {
-		if line == "" {
-			continue
-		}
-
-		var entry backfillEntry
-		if err := json.Unmarshal([]byte(line), &entry); err != nil {
-			continue
-		}
-
-		msg, _ := entry["_msg"].(string)
-		mac := extractMAC(msg)
-		if mac == "" {
-			continue
-		}
-
-		name := r.lookup(mac)
-		if name == "" {
-			continue
-		}
-
-		// Add station field and re-insert
-		entry["fields.station"] = name
-
-		enrichedJSON, err := json.Marshal(entry)
-		if err != nil {
-			continue
-		}
-
-		insertURL := fmt.Sprintf("%s/insert/jsonline?_stream_fields=tags.appname,tags.hostname&_msg_field=_msg&_time_field=_time",
-			victoriaLogsURL)
-		insertResp, err := client.Post(insertURL, "application/json", strings.NewReader(string(enrichedJSON)+"\n"))
-		if err != nil {
-			log.Printf("backfill insert error: %v", err)
-			continue
-		}
-		insertResp.Body.Close()
-		enriched++
-	}
-
-	if enriched > 0 {
-		// Delete the un-enriched originals via async task
-		deleteURL := fmt.Sprintf("%s/delete/run_task?filter=%s",
-			victoriaLogsURL, url.QueryEscape(query))
-		req, _ := http.NewRequest("POST", deleteURL, nil)
-		if deleteResp, err := client.Do(req); err == nil {
-			deleteResp.Body.Close()
-		}
-		log.Printf("backfilled %d events with station names", enriched)
-	}
-}
 
 // extractMAC finds the 17-char MAC address after AP-STA-CONNECTED or
 // AP-STA-DISCONNECTED in a syslog message field.
@@ -347,12 +246,6 @@ func main() {
 	}
 
 	go r.runRefreshLoop(interval)
-
-	bfInterval, err := time.ParseDuration(backfillInterval)
-	if err != nil {
-		log.Fatalf("invalid BACKFILL_INTERVAL: %v", err)
-	}
-	go r.runBackfillLoop(bfInterval, backfillWindow)
 
 	scanner := bufio.NewScanner(os.Stdin)
 	// Increase buffer for long lines
