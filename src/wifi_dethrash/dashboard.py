@@ -95,10 +95,14 @@ def _label_map_args(mac_names: dict[str, str]) -> str:
 
 
 def _wrap_label_map(expr: str, mac_names: dict[str, str] | None) -> str:
-    """Wrap a PromQL expression with label_map() if mac_names given."""
-    if not mac_names:
-        return expr
-    return f"label_map({expr}, {_label_map_args(mac_names)})"
+    """Wrap a PromQL expression with label_map() and station filter.
+
+    With mac_names: label_match(label_map(expr, ...), "mac", "$station")
+    Without: adds mac=~"$station" selector directly.
+    """
+    if mac_names:
+        return f'label_match(label_map({expr}, {_label_map_args(mac_names)}), "mac", "$station")'
+    return expr.replace("}", ', mac=~"$station"}', 1) if "}" in expr else expr
 
 
 def _build_panels(
@@ -109,9 +113,9 @@ def _build_panels(
     """Build panel list with datasource placeholders."""
     instance_re = "|".join(a.instance for a in aps)
 
-    rssi_expr = f'wifi_station_signal_dbm{{instance=~"{instance_re}", mac=~"$station"}}'
+    rssi_expr = f'wifi_station_signal_dbm{{instance=~"{instance_re}"}}'
     snr_expr = (
-        f'wifi_station_signal_dbm{{instance=~"{instance_re}", mac=~"$station"}}'
+        f'wifi_station_signal_dbm{{instance=~"{instance_re}"}}'
         f' - on(instance, device) group_left()'
         f' wifi_network_noise_dbm'
     )
@@ -429,14 +433,24 @@ def _build_panels(
     return panels
 
 
-def _station_variable_query() -> dict[str, object]:
-    """Build a query-based station variable (file-import, no mac_names)."""
+def _station_variable(mac_names: dict[str, str] | None) -> dict[str, object]:
+    """Build a station selector variable.
+
+    Uses label_map in the query so the dropdown shows hostnames
+    instead of raw MACs. The selected value is the hostname (after
+    label_map), which matches the label_map'd panel queries.
+    """
+    if mac_names:
+        query = f"label_values(label_map(wifi_station_signal_dbm, {_label_map_args(mac_names)}), mac)"
+    else:
+        query = "label_values(wifi_station_signal_dbm, mac)"
+
     return {
         "name": "station",
         "label": "Station",
         "type": "query",
         "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
-        "query": "label_values(wifi_station_signal_dbm, mac)",
+        "query": query,
         "includeAll": True,
         "allValue": ".*",
         "multi": False,
@@ -445,38 +459,12 @@ def _station_variable_query() -> dict[str, object]:
     }
 
 
-def _station_variable_custom(mac_names: dict[str, str]) -> dict[str, object]:
-    """Build a custom station variable with hostname labels (API push)."""
-    options: list[dict[str, str]] = [{"text": "All", "value": "$__all"}]
-    for mac, name in sorted(mac_names.items(), key=lambda x: x[1].lower()):
-        options.append({"text": f"{name} ({mac})", "value": mac.upper()})
-
-    # Add MACs without names (from Prometheus but not in DHCP logs)
-    return {
-        "name": "station",
-        "label": "Station",
-        "type": "custom",
-        "query": ", ".join(
-            f"{mac.upper()} : {name} ({mac})"
-            for mac, name in sorted(mac_names.items(), key=lambda x: x[1].lower())
-        ),
-        "options": options,
-        "current": {"text": "All", "value": "$__all"},
-        "includeAll": True,
-        "allValue": ".*",
-        "multi": False,
-    }
-
-
 def _dashboard_shell(
     panels: list[dict[str, object]],
     mac_names: dict[str, str] | None = None,
 ) -> dict[str, object]:
     """Common dashboard structure shared by both formats."""
-    if mac_names:
-        variables = [_station_variable_custom(mac_names)]
-    else:
-        variables = [_station_variable_query()]
+    variables = [_station_variable(mac_names)]
 
     return {
         "title": "WiFi Mesh Health",
