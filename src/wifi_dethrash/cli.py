@@ -68,12 +68,14 @@ def _handle_error(source: str, exc: Exception) -> NoReturn:
               help="Write Grafana dashboard JSON to file and exit")
 @click.option("--push-dashboard", is_flag=True, default=False,
               help="Push dashboard to Grafana via API and exit")
+@click.option("--annotate", default=None,
+              help="Add annotation to Grafana dashboard and exit")
 @click.option("--overlap-threshold", default=6, help="Max RSSI diff (dB) to count as overlap")
 @click.option("--snr-threshold", default=15, help="Min SNR (dB) for a healthy association")
 @click.option("--rssi-floor", default=-75, help="Min RSSI (dBm) below which txpower reduction is skipped")
 def main(config_path, vm_url, vl_url, grafana_url, grafana_api_key,
          mesh_ssids, window, host_label, mac, generate_dashboard,
-         push_dashboard, overlap_threshold, snr_threshold, rssi_floor):
+         push_dashboard, annotate, overlap_threshold, snr_threshold, rssi_floor):
     """WiFi mesh thrashing analyzer for OpenWrt."""
     from pathlib import Path
 
@@ -86,6 +88,19 @@ def main(config_path, vm_url, vl_url, grafana_url, grafana_api_key,
     effective_grafana_api_key = grafana_api_key or cfg.grafana_api_key
     effective_mesh_ssids = list(mesh_ssids) if mesh_ssids else cfg.mesh_ssids
 
+    if push_dashboard or annotate:
+        if not effective_grafana_url:
+            raise click.UsageError("--grafana-url required (or set grafana_url in config)")
+        if not effective_grafana_api_key:
+            raise click.UsageError("--grafana-api-key required (or set grafana_api_key in config)")
+
+    if annotate:
+        from wifi_dethrash.grafana import GrafanaClient
+        with GrafanaClient(effective_grafana_url, effective_grafana_api_key) as gf:
+            ann_id = gf.annotate(annotate)
+        click.echo(f"Annotation created (id={ann_id}): {annotate}")
+        return
+
     if not effective_vm_url:
         raise click.UsageError("--vm-url required (or set vm_url in config)")
 
@@ -94,12 +109,6 @@ def main(config_path, vm_url, vl_url, grafana_url, grafana_api_key,
     start = end - delta
 
     macs = list(mac) if mac else None
-
-    if push_dashboard:
-        if not effective_grafana_url:
-            raise click.UsageError("--grafana-url required (or set grafana_url in config)")
-        if not effective_grafana_api_key:
-            raise click.UsageError("--grafana-api-key required (or set grafana_api_key in config)")
 
     if not generate_dashboard and not push_dashboard and not effective_vl_url:
         raise click.UsageError("--vl-url is required for analysis mode (or set vl_url in config)")

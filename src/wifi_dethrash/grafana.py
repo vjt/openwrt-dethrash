@@ -59,3 +59,21 @@ class GrafanaClient:
         )
         resp.raise_for_status()
         return resp.json().get("url", "/")
+
+    def annotate(
+        self,
+        text: str,
+        tags: list[str] | None = None,
+        dashboard_uid: str = "wifi-dethrash",
+    ) -> int:
+        """Create an annotation on the dashboard. Returns annotation ID."""
+        resp = self._client.post(
+            f"{self._base_url}/api/annotations",
+            json={
+                "dashboardUID": dashboard_uid,
+                "text": text,
+                "tags": tags or ["config-change"],
+            },
+        )
+        resp.raise_for_status()
+        return resp.json().get("id", 0)

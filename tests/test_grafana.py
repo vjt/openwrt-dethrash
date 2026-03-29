@@ -86,3 +86,38 @@ class TestPushDashboard:
 
         request = respx_mock.calls[0].request
         assert request.headers["Authorization"] == "Bearer glsa_push_token"
+
+
+ANNOTATE_RESP = {"id": 42, "message": "Annotation added"}
+
+
+class TestAnnotate:
+    def test_creates_annotation(self, respx_mock) -> None:
+        respx_mock.post("http://grafana:3000/api/annotations").respond(
+            json=ANNOTATE_RESP
+        )
+
+        with GrafanaClient("http://grafana:3000", "glsa_test") as gf:
+            ann_id = gf.annotate("txpower changed")
+
+        assert ann_id == 42
+
+        import json
+        request = respx_mock.calls[0].request
+        body = json.loads(request.content)
+        assert body["text"] == "txpower changed"
+        assert body["dashboardUID"] == "wifi-dethrash"
+        assert body["tags"] == ["config-change"]
+
+    def test_custom_tags(self, respx_mock) -> None:
+        respx_mock.post("http://grafana:3000/api/annotations").respond(
+            json=ANNOTATE_RESP
+        )
+
+        with GrafanaClient("http://grafana:3000", "glsa_test") as gf:
+            gf.annotate("test", tags=["usteer", "txpower"])
+
+        import json
+        request = respx_mock.calls[0].request
+        body = json.loads(request.content)
+        assert body["tags"] == ["usteer", "txpower"]
