@@ -208,34 +208,40 @@ def _build_panels(
         {
             "id": 4,
             "title": "TX Power by Radio",
-            "type": "table",
-            "gridPos": {"h": 6, "w": 12, "x": 0, "y": 24},
+            "type": "bargauge",
+            "gridPos": {"h": 8, "w": 12, "x": 0, "y": 24},
             "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
             "targets": [
                 {
                     "refId": "A",
                     "expr": f'wifi_radio_txpower_dbm{{instance=~"{instance_re}"}}',
                     "instant": True,
-                    "format": "table",
-                },
-                {
-                    "refId": "B",
-                    "expr": f'wifi_radio_configured_txpower{{instance=~"{instance_re}"}}',
-                    "instant": True,
-                    "format": "table",
+                    "legendFormat": "{{instance}} / {{device}} ({{ssid}})",
                 },
             ],
             "fieldConfig": {
-                "defaults": {"unit": "dBm"},
+                "defaults": {
+                    "unit": "dBm",
+                    "min": 0,
+                    "max": 30,
+                    "thresholds": {
+                        "mode": "absolute",
+                        "steps": [
+                            {"color": "yellow", "value": None},
+                            {"color": "green", "value": 10},
+                            {"color": "orange", "value": 23},
+                        ],
+                    },
+                },
                 "overrides": [],
             },
-            "options": {},
-            "transformations": [
-                {
-                    "id": "merge",
-                    "options": {},
-                },
-            ],
+            "options": {
+                "orientation": "horizontal",
+                "displayMode": "gradient",
+                "showUnfilled": True,
+                "valueMode": "color",
+                "textSizeMode": "auto",
+            },
         },
         {
             "id": 5,
