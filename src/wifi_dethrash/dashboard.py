@@ -82,11 +82,22 @@ def _build_topology_panel(
 
 
 def _mac_transforms(mac_names: dict[str, str]) -> list[dict[str, object]]:
-    """Build Grafana renameByRegex transformations for MAC→hostname."""
+    """Build Grafana renameByRegex transformations for MAC→hostname.
+
+    Generates case-insensitive regex since Prometheus labels may have
+    uppercase MACs while DHCP logs have lowercase.
+    """
+    def _ci_mac(mac: str) -> str:
+        """Make MAC regex case-insensitive: a→[aA], B→[bB]."""
+        return "".join(
+            f"[{c.lower()}{c.upper()}]" if c.isalpha() else c
+            for c in mac
+        )
+
     return [
         {
             "id": "renameByRegex",
-            "options": {"regex": mac, "renamePattern": name},
+            "options": {"regex": _ci_mac(mac), "renamePattern": name},
         }
         for mac, name in sorted(mac_names.items())
     ]
