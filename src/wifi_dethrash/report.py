@@ -1,4 +1,10 @@
 from collections import defaultdict
+from io import StringIO
+
+from rich.console import Console
+from rich.panel import Panel
+from rich.table import Table
+from rich.text import Text
 
 from wifi_dethrash.analyzers.thrashing import ThrashSequence
 from wifi_dethrash.analyzers.overlap import OverlapResult
@@ -19,125 +25,41 @@ def render_report(
     txpower: list[TxPowerReading] | None = None,
     noise: list[NoiseReading] | None = None,
 ) -> str:
-    lines: list[str] = []
-    lines.append("=" * 60)
-    lines.append("  wifi-dethrash report")
-    lines.append("=" * 60)
-    lines.append("")
+    buf = StringIO()
+    console = Console(file=buf, force_terminal=True, width=100)
 
-    # Network state table
+    console.print(Panel("[bold]wifi-dethrash report[/bold]", expand=False,
+                        border_style="blue"))
+    console.print()
+
+    # Network state
     if txpower or noise:
-        lines.append("--- Network state ---")
-        lines.extend(_render_network_state(txpower or [], noise or []))
-        lines.append("")
+        _render_network_state(console, txpower or [], noise or [])
 
-    # Thrashing — aggregated by (mac, ap_pair)
-    lines.append("--- Thrashing summary ---")
-    if thrash:
-        agg = _aggregate_thrashing(thrash)
-        for mac, pair, total, episodes, first, last in agg:
-            first_short = first[:10]
-            last_short = last[:10]
-            lines.append(
-                f"  {mac}  {pair[0]} <-> {pair[1]}  "
-                f"{total} connects in {episodes} episodes  ({first_short} to {last_short})"
-            )
-    else:
-        lines.append("  No thrashing detected.")
-    lines.append("")
+    # Thrashing
+    _render_thrashing(console, thrash)
 
-    # Overlap — filtered to significant results
-    lines.append("--- RSSI overlap (significant) ---")
-    significant = [o for o in overlap if o.overlap_count >= MIN_OVERLAP_SAMPLES]
-    if significant:
-        for o in significant:
-            pct = round(o.overlap_count / o.total_samples * 100) if o.total_samples else 0
-            lines.append(
-                f"  {o.mac}  {o.ap_pair[0]} <-> {o.ap_pair[1]}  "
-                f"avg diff {o.rssi_diff} dB  "
-                f"({o.overlap_count}/{o.total_samples} samples = {pct}%)  "
-                f"[{o.ap_pair[0]}: {o.avg_rssi_a} dBm, {o.ap_pair[1]}: {o.avg_rssi_b} dBm]"
-            )
-    else:
-        lines.append("  No significant overlap.")
-    if len(overlap) > len(significant):
-        lines.append(f"  ({len(overlap) - len(significant)} minor overlaps with <{MIN_OVERLAP_SAMPLES} samples omitted)")
-    lines.append("")
+    # Overlap
+    _render_overlap(console, overlap)
 
     # Weak associations
-    lines.append("--- Weak associations ---")
-    if weak:
-        for w in weak:
-            lines.append(
-                f"  {w.mac} on {w.ap}  avg SNR {w.avg_snr} dB  "
-                f"({w.sample_count} samples)"
-            )
-    else:
-        lines.append("  No weak associations.")
-    lines.append("")
+    _render_weak(console, weak)
 
     # Recommendations
-    lines.append("--- Recommendations ---")
-    has_recs = False
+    _render_recommendations(console, plan, usteer_commands)
 
-    if plan and plan.changes:
-        has_recs = True
-        lines.append("  Txpower plan:")
-        for c in plan.changes:
-            delta = c.proposed - c.current
-            sign = "+" if delta > 0 else ""
-            lines.append(
-                f"    {c.ap:<12s} {c.radio}: {c.current} -> {c.proposed} dBm ({sign}{delta})"
-            )
-            lines.append(
-                f"      ssh root@{c.ap} uci set wireless.{c.radio}.txpower={c.proposed}"
-            )
-        lines.append("")
-
-        lines.append("  Expected impact on thrashing pairs:")
-        for i in plan.pair_impacts:
-            if i.rssi_diff_after > i.rssi_diff_before + 0.5:
-                mark = "+"
-            elif i.rssi_diff_after < i.rssi_diff_before - 0.5:
-                mark = "-"
-            else:
-                mark = "~"
-            covered = "ok" if i.rssi_diff_after >= i.signal_diff_threshold else \
-                      f"< signal_diff {i.signal_diff_threshold}"
-            lines.append(
-                f"    {mark} {i.ap_pair[0]} <-> {i.ap_pair[1]}:  "
-                f"diff {i.rssi_diff_before} -> {i.rssi_diff_after} dB  "
-                f"({i.total_thrash_connects} connects)  [{covered}]"
-            )
-        lines.append("")
-
-    if usteer_commands:
-        has_recs = True
-        lines.append("  usteer:")
-        for c in usteer_commands:
-            lines.append(f"    {c}")
-            lines.append(f"      # {c.reason}")
-        lines.append("")
-
-    if not has_recs:
-        lines.append("  No changes recommended. Looking clean.")
-        lines.append("")
-
-    return "\n".join(lines)
+    return buf.getvalue()
 
 
 def _render_network_state(
+    console: Console,
     txpower: list[TxPowerReading],
     noise: list[NoiseReading],
-) -> list[str]:
-    """Render a per-AP, per-radio network state table."""
-    # Build noise lookup: (ap, radio) -> latest noise reading
+) -> None:
     noise_by_ap_radio: dict[tuple[str, str], int] = {}
     for n in noise:
-        key = (n.ap, n.radio)
-        noise_by_ap_radio[key] = n.noise_dbm
+        noise_by_ap_radio[(n.ap, n.radio)] = n.noise_dbm
 
-    # Build rows from txpower data (one row per AP+radio)
     rows: list[tuple[str, str, int, int, str, int | None]] = []
     for t in txpower:
         noise_val = noise_by_ap_radio.get((t.ap, t.radio))
@@ -146,29 +68,215 @@ def _render_network_state(
 
     rows.sort(key=lambda r: (r[4], r[0], r[1]))
 
-    lines: list[str] = []
-    current_band = ""
-    for ap, radio, channel, txp, band, noise_val in rows:
-        if band != current_band:
-            current_band = band
-            lines.append(f"  {band}:")
-            lines.append(f"    {'AP':<12s} {'Radio':<8s} {'Ch':>4s} {'TxPwr':>6s} {'Noise':>6s}")
-            lines.append(f"    {'—'*12} {'—'*8} {'—'*4} {'—'*6} {'—'*6}")
-        noise_str = f"{noise_val}" if noise_val is not None else "?"
-        lines.append(
-            f"    {ap:<12s} {radio:<8s} {channel:>4d} {txp:>4d} dB {noise_str:>4s} dB"
+    for band_name in ("2.4 GHz", "5 GHz"):
+        band_rows = [r for r in rows if r[4] == band_name]
+        if not band_rows:
+            continue
+
+        table = Table(title=f"Network State \u2014 {band_name}",
+                      title_style="bold cyan", border_style="dim")
+        table.add_column("AP", style="bold")
+        table.add_column("Radio")
+        table.add_column("Ch", justify="right")
+        table.add_column("TxPwr", justify="right")
+        table.add_column("Noise", justify="right")
+
+        for ap, radio, channel, txp, _, noise_val in band_rows:
+            noise_str = f"{noise_val} dB" if noise_val is not None else "?"
+            table.add_row(ap, radio, str(channel), f"{txp} dB", noise_str)
+
+        console.print(table)
+        console.print()
+
+
+def _render_thrashing(console: Console, thrash: list[ThrashSequence]) -> None:
+    table = Table(title="Thrashing Summary", title_style="bold yellow",
+                  border_style="dim")
+    table.add_column("MAC", style="dim")
+    table.add_column("AP Pair", style="bold")
+    table.add_column("Connects", justify="right", style="red")
+    table.add_column("Episodes", justify="right")
+    table.add_column("Period")
+
+    if not thrash:
+        console.print("[green]No thrashing detected.[/green]")
+        console.print()
+        return
+
+    agg = _aggregate_thrashing(thrash)
+    for mac, pair, total, episodes, first, last in agg:
+        table.add_row(
+            mac,
+            f"{pair[0]} \u2194 {pair[1]}",
+            str(total),
+            str(episodes),
+            f"{first[:10]} \u2192 {last[:10]}",
         )
-    return lines
+
+    console.print(table)
+    console.print()
+
+
+def _render_overlap(console: Console, overlap: list[OverlapResult]) -> None:
+    significant = [o for o in overlap if o.overlap_count >= MIN_OVERLAP_SAMPLES]
+
+    table = Table(title="RSSI Overlap (significant)",
+                  title_style="bold magenta", border_style="dim")
+    table.add_column("MAC", style="dim")
+    table.add_column("AP Pair", style="bold")
+    table.add_column("Avg Diff", justify="right")
+    table.add_column("Samples", justify="right")
+    table.add_column("RSSI", justify="right")
+
+    if not significant:
+        console.print("[green]No significant overlap.[/green]")
+        console.print()
+        return
+
+    for o in significant:
+        pct = round(o.overlap_count / o.total_samples * 100) if o.total_samples else 0
+        table.add_row(
+            o.mac,
+            f"{o.ap_pair[0]} \u2194 {o.ap_pair[1]}",
+            f"{o.rssi_diff} dB",
+            f"{o.overlap_count}/{o.total_samples} ({pct}%)",
+            f"{o.avg_rssi_a}/{o.avg_rssi_b} dBm",
+        )
+
+    console.print(table)
+    omitted = len(overlap) - len(significant)
+    if omitted:
+        console.print(f"  [dim]({omitted} minor overlaps with <{MIN_OVERLAP_SAMPLES} samples omitted)[/dim]")
+    console.print()
+
+
+def _render_weak(console: Console, weak: list[WeakAssociation]) -> None:
+    if not weak:
+        console.print("[green]No weak associations.[/green]")
+        console.print()
+        return
+
+    table = Table(title="Weak Associations", title_style="bold red",
+                  border_style="dim")
+    table.add_column("MAC", style="dim")
+    table.add_column("AP", style="bold")
+    table.add_column("Avg SNR", justify="right")
+    table.add_column("Samples", justify="right")
+
+    for w in weak:
+        snr_style = "red bold" if w.avg_snr < 10 else "yellow"
+        table.add_row(
+            w.mac, w.ap,
+            Text(f"{w.avg_snr} dB", style=snr_style),
+            str(w.sample_count),
+        )
+
+    console.print(table)
+    console.print()
+
+
+def _render_recommendations(
+    console: Console,
+    plan: TxPowerPlan | None,
+    usteer_commands: list[UCICommand] | None,
+) -> None:
+    has_recs = False
+
+    if plan and plan.changes:
+        has_recs = True
+
+        # Txpower plan table
+        table = Table(title="Txpower Plan", title_style="bold green",
+                      border_style="dim")
+        table.add_column("AP", style="bold")
+        table.add_column("Radio")
+        table.add_column("Current", justify="right")
+        table.add_column("", justify="center")
+        table.add_column("Proposed", justify="right")
+        table.add_column("Delta", justify="right")
+        table.add_column("Command", style="dim")
+
+        for c in plan.changes:
+            delta = c.proposed - c.current
+            sign = "+" if delta > 0 else ""
+            delta_style = "green" if delta > 0 else "red"
+            table.add_row(
+                c.ap, c.radio,
+                f"{c.current} dB",
+                "\u2192",
+                f"{c.proposed} dB",
+                Text(f"{sign}{delta}", style=delta_style),
+                f"ssh root@{c.ap} uci set wireless.{c.radio}.txpower={c.proposed}",
+            )
+
+        console.print(table)
+        console.print()
+
+        # Impact analysis table
+        impact_table = Table(title="Expected Impact on Thrashing Pairs",
+                             title_style="bold", border_style="dim")
+        impact_table.add_column("", justify="center", width=2)
+        impact_table.add_column("AP Pair", style="bold")
+        impact_table.add_column("Before", justify="right")
+        impact_table.add_column("", justify="center")
+        impact_table.add_column("After", justify="right")
+        impact_table.add_column("Connects", justify="right", style="dim")
+        impact_table.add_column("Coverage", justify="left")
+
+        for i in plan.pair_impacts:
+            if i.rssi_diff_after > i.rssi_diff_before + 0.5:
+                mark = Text("\u2191", style="green bold")
+            elif i.rssi_diff_after < i.rssi_diff_before - 0.5:
+                mark = Text("\u2193", style="red bold")
+            else:
+                mark = Text("\u2022", style="yellow")
+
+            if i.rssi_diff_after >= i.signal_diff_threshold:
+                covered = Text("ok", style="green")
+            else:
+                covered = Text(
+                    f"< signal_diff {i.signal_diff_threshold}",
+                    style="yellow",
+                )
+
+            impact_table.add_row(
+                mark,
+                f"{i.ap_pair[0]} \u2194 {i.ap_pair[1]}",
+                f"{i.rssi_diff_before} dB",
+                "\u2192",
+                f"{i.rssi_diff_after} dB",
+                str(i.total_thrash_connects),
+                covered,
+            )
+
+        console.print(impact_table)
+        console.print()
+
+    if usteer_commands:
+        has_recs = True
+        usteer_table = Table(title="usteer Configuration",
+                             title_style="bold blue", border_style="dim")
+        usteer_table.add_column("Command", style="bold")
+        usteer_table.add_column("Reason", style="dim")
+
+        for c in usteer_commands:
+            usteer_table.add_row(
+                f"ssh root@<ap> {c.command}",
+                c.reason,
+            )
+
+        console.print(usteer_table)
+        console.print()
+
+    if not has_recs:
+        console.print("[green bold]No changes recommended. Looking clean.[/green bold]")
+        console.print()
 
 
 def _aggregate_thrashing(
     thrash: list[ThrashSequence],
 ) -> list[tuple[str, tuple[str, str], int, int, str, str]]:
-    """Aggregate thrashing sequences by (mac, ap_pair).
-
-    Returns list of (mac, ap_pair, total_connects, episode_count, first_time, last_time)
-    sorted by total_connects descending.
-    """
+    """Aggregate thrashing sequences by (mac, ap_pair)."""
     agg: dict[tuple[str, tuple[str, str]], list[ThrashSequence]] = defaultdict(list)
     for s in thrash:
         agg[(s.mac, s.ap_pair)].append(s)
