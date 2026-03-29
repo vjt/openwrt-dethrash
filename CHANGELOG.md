@@ -2,13 +2,27 @@
 
 ## Unreleased
 
-### Planned
-- Config file (`~/.config/wifi-dethrash/config.toml`) for URLs, credentials, floor plan
-- Grafana API integration — push dashboards directly, no JSON copy-paste
-- New Grafana panels: thrashing rate over time, per-client roaming timeline,
-  RSSI heatmap, SNR distribution, usteer effectiveness
-- Topology view panel with floor-by-floor AP placement and client counts
-- SSID-based AP filtering (Mercury/Saturn mesh, exclude non-mesh like jeeves)
+### Added
+- **Config file** (`~/.config/wifi-dethrash/config.toml`) — TOML config for
+  URLs, Grafana credentials, mesh SSIDs, and AP floor plan. CLI options
+  override config values. Config is optional — tool still works with CLI args.
+- **Grafana API client** — `--push-dashboard` pushes dashboard directly via
+  Grafana API using service account token. Discovers datasource UIDs
+  automatically. `--generate-dashboard` kept for file export.
+- **SSID-based AP filtering** — `mesh_ssids` config (or `--mesh-ssids` CLI)
+  filters APs to only those broadcasting configured SSIDs. Non-mesh APs
+  (e.g. jeeves with 5G backup) automatically excluded.
+- **5 new Grafana panels**: thrashing rate (connects/hour per AP), roaming
+  timeline (state-timeline per MAC), RSSI heatmap, SNR distribution with
+  threshold bands, usteer effectiveness (ft vs open auth_alg ratio).
+- **Topology canvas panel** — floor-by-floor AP diagram with client counts,
+  generated from `[aps]` config section. Only present when floor plan configured.
+- `ssid` field on `TxPowerReading` — extracted from existing Prometheus label.
+
+### Changed
+- Dashboard module refactored: shared `_build_panels()` with two output
+  formats (file-import with `__inputs`, API with real datasource UIDs).
+- CLI options `--vm-url` and `--vl-url` now optional when set in config file.
 
 ## 0.1.1 — 2026-03-29
 

@@ -2,7 +2,7 @@
 
 Offline WiFi mesh analyzer for OpenWrt. Detects AP thrashing and weak
 associations from historical metrics and logs, recommends txpower and usteer
-UCI settings, and optionally generates a Grafana dashboard.
+UCI settings, and generates Grafana dashboards (file export or direct API push).
 
 ## Install
 
@@ -12,68 +12,79 @@ source .venv/bin/activate
 pip install -e ".[dev]"
 ```
 
+## Configuration
+
+Create `~/.config/wifi-dethrash/config.toml`:
+
+```toml
+vm_url = "https://metrics.example.com"
+vl_url = "https://victoria.example.com"
+grafana_url = "https://grafana.example.com"
+grafana_api_key = "glsa_..."
+mesh_ssids = ["Mercury", "Saturn"]
+
+[aps]
+golem = "Ground floor / Living room"
+gordon = "Ground floor / Kitchen"
+albert = "First floor / Bedroom"
+pingu = "First floor / Office"
+mowgli = "-1 / Garden"
+parrot = "-1 / Laundry"
+```
+
+All fields are optional. CLI options override config values.
+
 ## Usage
 
 ```bash
-wifi-dethrash --vm-url http://victoriametrics:8428 --vl-url http://victorialogs:9428
+# With config file (no URL flags needed)
+wifi-dethrash
+
+# With explicit URLs
+wifi-dethrash --vm-url http://vm:8428 --vl-url http://vl:9428
+
+# Push dashboard to Grafana
+wifi-dethrash --push-dashboard
+
+# Export dashboard as JSON file
+wifi-dethrash --generate-dashboard dashboard.json
 ```
 
 ### Options
 
 | Option | Default | Description |
 |--------|---------|-------------|
-| `--vm-url` | required | VictoriaMetrics base URL |
-| `--vl-url` | — | VictoriaLogs base URL (required unless `--generate-dashboard`) |
-| `--window` | `24h` | Time window to analyze (e.g. `1h`, `24h`, `7d`) |
+| `--config` | `~/.config/wifi-dethrash/config.toml` | Config file path |
+| `--vm-url` | from config | VictoriaMetrics base URL |
+| `--vl-url` | from config | VictoriaLogs base URL (required for analysis) |
+| `--grafana-url` | from config | Grafana base URL |
+| `--grafana-api-key` | from config | Grafana service account token |
+| `--mesh-ssids` | from config | Mesh SSIDs to filter APs, repeatable |
+| `--window` | `24h` | Time window (e.g. `1h`, `24h`, `7d`) |
 | `--host-label` | `instance` | Metric label containing AP hostname |
-| `--mac` | all | Filter to specific MAC address(es), repeatable |
-| `--overlap-threshold` | `6` | Max RSSI diff (dB) to count as overlap |
-| `--snr-threshold` | `15` | Min SNR (dB) for a healthy association |
-| `--generate-dashboard` | off | Write Grafana dashboard JSON to file and exit |
+| `--mac` | all | Filter to specific MAC(s), repeatable |
+| `--overlap-threshold` | `6` | Max RSSI diff (dB) for overlap |
+| `--snr-threshold` | `15` | Min SNR (dB) for healthy association |
+| `--rssi-floor` | `-75` | Min RSSI (dBm) below which txpower reduction is skipped |
+| `--generate-dashboard` | off | Write Grafana dashboard JSON to file |
+| `--push-dashboard` | off | Push dashboard to Grafana via API |
 
-### Examples
+### Grafana dashboard
 
-```bash
-# Analyze last 24 hours
-wifi-dethrash --vm-url http://vm:8428 --vl-url http://vl:9428
+The dashboard includes 12 panels:
 
-# Analyze last hour for a specific device
-wifi-dethrash --vm-url http://vm:8428 --vl-url http://vl:9428 --window 1h --mac aa:bb:cc:dd:ee:ff
-
-# Generate Grafana dashboard (only needs VM, no VL required)
-wifi-dethrash --vm-url http://vm:8428 --generate-dashboard dashboard.json
-```
-
-### Example output
-
-```
-============================================================
-  wifi-dethrash report
-============================================================
-
---- Thrashing summary ---
-  aa:bb:cc:dd:ee:01  golem <-> pingu  345 connects in 30 episodes  (2026-02-09 to 2026-02-15)
-
---- RSSI overlap (significant) ---
-  aa:bb:cc:dd:ee:01  golem <-> pingu  avg diff 3.2 dB  (89/100 samples = 89%)  [golem: -52 dBm, pingu: -55 dBm]
-
---- Weak associations ---
-  aa:bb:cc:dd:ee:02 on mowgli  avg SNR 8 dB  (200 samples)
-
---- Recommendations ---
-  1. golem <-> pingu (radio1): CRITICAL
-     345 thrashing connects across 30 episodes
-     RSSI overlap: 3.2 dB avg diff (89% of samples)
-     golem: -52 dBm (txpower 23 dBm) | pingu: -55 dBm (txpower 20 dBm)
-     -> Reduce golem radio1 txpower: 23 -> 18 dBm
-        ssh root@golem uci set wireless.radio1.txpower=18
-
-  usteer:
-  ssh root@<ap> uci set usteer.@usteer[0].min_connect_snr=15
-    # Reject new associations below 15 dB SNR
-  ssh root@<ap> uci set usteer.@usteer[0].min_snr=12
-    # Kick existing clients below 12 dB SNR
-```
+1. **RSSI by Station** — per-MAC signal strength over time
+2. **Noise Floor** — per-radio noise floor
+3. **Connect/Disconnect Events** — hostapd event log
+4. **TX Power by Radio** — current and configured txpower
+5. **802.11r/k/v Status** — fast roaming config per AP
+6. **Usteer Thresholds** — usteer SNR/signal_diff settings
+7. **Thrashing Rate** — connects/hour per AP (bar chart)
+8. **Roaming Timeline** — which AP each MAC is on over time
+9. **RSSI Heatmap** — signal distribution over time
+10. **SNR Distribution** — SNR with good/marginal/weak bands
+11. **usteer Effectiveness** — ft vs open auth_alg ratio
+12. **AP Topology** — floor-by-floor AP map with client counts (requires `[aps]` config)
 
 ## Data sources
 
@@ -123,13 +134,10 @@ opkg update
 opkg install wifi-dethrash-collector
 ```
 
-The collector also exports:
-- `wifi_iface_ieee80211r_enabled`, `wifi_iface_ieee80211k_enabled`, `wifi_iface_ieee80211v_enabled`
-- `wifi_usteer_min_connect_snr`, `wifi_usteer_min_snr`, `wifi_usteer_roam_scan_snr`, etc.
-
 ## Development
 
 ```bash
 pip install -e ".[dev]"
-pytest -v
+pytest -v              # 93 tests
+pyright src/ tests/    # zero errors
 ```

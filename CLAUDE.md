@@ -11,7 +11,9 @@ txpower and usteer tuning, and generates Grafana dashboards.
 
 ```
 src/wifi_dethrash/
-  cli.py              # Click CLI entry point (error handling, --generate-dashboard)
+  cli.py              # Click CLI entry point (config, --push-dashboard, SSID filter)
+  config.py           # TOML config loader (~/.config/wifi-dethrash/config.toml)
+  grafana.py          # Grafana API client (datasource discovery, dashboard push)
   sources/
     vm.py             # VictoriaMetrics client (RSSI, noise, AP discovery, txpower)
     vl.py             # VictoriaLogs client (hostapd events)
@@ -21,7 +23,7 @@ src/wifi_dethrash/
     weak.py           # Finds low-SNR associations
   recommender.py      # Generates txpower + usteer recommendations
   report.py           # Terminal report renderer (aggregated, filtered)
-  dashboard.py        # Grafana 12 dashboard JSON generator (file-import format)
+  dashboard.py        # Grafana dashboard generator (file-import + API formats, 12 panels)
   utils.py            # ifname_to_radio helper
 openwrt/
   Makefile             # OpenWrt SDK package Makefile
@@ -29,7 +31,7 @@ openwrt/
     wifi_dethrash.lua  # Prometheus collector deployed on OpenWrt APs
 tests/
   conftest.py         # respx mock fixture
-  test_*.py           # One test file per module (67 tests)
+  test_*.py           # One test file per module (93 tests)
 ```
 
 ## Engineering Standards
@@ -94,7 +96,7 @@ tests/
 ## Commands
 
 ```bash
-.venv/bin/pytest -v              # run tests (67 tests, ~0.1s)
+.venv/bin/pytest -v              # run tests (93 tests, ~0.6s)
 .venv/bin/pyright src/ tests/    # type check (zero errors)
 .venv/bin/wifi-dethrash --help   # CLI help
 ```
@@ -110,7 +112,9 @@ tests/
 - MAC addresses normalized to lowercase throughout
 - Recommendations require BOTH thrashing AND overlap for a pair (no false positives)
 - Txpower suggestions: reduce louder AP by (overlap_threshold - rssi_diff + 2), clamped to [5, current - 2]
-- Grafana dashboard uses file-import format with __inputs for datasource selection (not API format)
+- Grafana dashboard: file-import format (--generate-dashboard) with __inputs, or API format (--push-dashboard) with real datasource UIDs
+- Config file (TOML) provides URLs, Grafana credentials, mesh SSIDs, and AP floor plan
+- SSID filtering: only APs broadcasting configured mesh SSIDs are included in analysis
 - Report aggregates thrashing by (mac, ap_pair) and filters overlap to >= 5 samples
 
 ## Data sources
@@ -137,7 +141,8 @@ Deployed on each AP as a prometheus-node-exporter-lua collector. Exports:
 ## Gotchas learned during development
 
 - VictoriaLogs datasource plugin ID is `victoriametrics-logs-datasource` (not `victorialogs-datasource`)
-- Grafana 12 rejects dashboard JSON wrapped in `{"dashboard": {...}}` — use bare JSON
+- Grafana 12 file-import rejects JSON wrapped in `{"dashboard": {...}}` — use bare JSON
+- Grafana 12 API push requires `{"dashboard": {...}, "overwrite": true}` wrapper (opposite of file-import)
 - Grafana 12 requires schemaVersion >= 39, panel `id` fields, and `refId` on targets
 - `--vl-url` is optional when using `--generate-dashboard` (only needs VM to discover APs)
 - txpower fetch uses instant query (`/api/v1/query`), not range query
