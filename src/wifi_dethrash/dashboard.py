@@ -487,31 +487,18 @@ def _build_panels(
     return panels
 
 
-def _station_variable(mac_names: dict[str, str] | None) -> dict[str, object]:
-    """Build a station selector variable.
+def _station_variable() -> dict[str, object]:
+    """Build a station selector variable from VictoriaLogs.
 
-    With mac_names: custom variable listing hostnames (label_map'd values).
-    Without: query variable using raw MACs from Prometheus.
+    Queries unique fields.station values from hostapd events.
+    Dynamic — new devices appear as they connect.
     """
-    if mac_names:
-        # Hostnames as values — matches label_match() in panel queries
-        names = sorted(set(mac_names.values()), key=str.lower)
-        return {
-            "name": "station",
-            "label": "Station",
-            "type": "custom",
-            "query": ",".join(names),
-            "includeAll": True,
-            "allValue": ".*",
-            "multi": False,
-        }
-
     return {
         "name": "station",
         "label": "Station",
         "type": "query",
-        "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
-        "query": "label_values(wifi_station_signal_dbm, mac)",
+        "datasource": {"type": "victoriametrics-logs-datasource", "uid": "${DS_VICTORIALOGS}"},
+        "query": "tags.appname:hostapd AND fields.station:* | field_values fields.station limit 200",
         "includeAll": True,
         "allValue": ".*",
         "multi": False,
@@ -520,12 +507,9 @@ def _station_variable(mac_names: dict[str, str] | None) -> dict[str, object]:
     }
 
 
-def _dashboard_shell(
-    panels: list[dict[str, object]],
-    mac_names: dict[str, str] | None = None,
-) -> dict[str, object]:
+def _dashboard_shell(panels: list[dict[str, object]]) -> dict[str, object]:
     """Common dashboard structure shared by both formats."""
-    variables = [_station_variable(mac_names)]
+    variables = [_station_variable()]
 
     return {
         "title": "WiFi Mesh Health",
@@ -583,7 +567,7 @@ def generate_dashboard(
         ],
         "id": None,
         "uid": None,
-        **_dashboard_shell(panels, mac_names=None),
+        **_dashboard_shell(panels),
     }
     return json.dumps(dashboard, indent=2)
 
@@ -602,7 +586,7 @@ def generate_dashboard_api(
     panels = _build_panels(aps, ap_locations=ap_locations, mac_names=mac_names)
     dashboard = {
         "uid": "wifi-dethrash",
-        **_dashboard_shell(panels, mac_names=mac_names),
+        **_dashboard_shell(panels),
     }
 
     # Replace datasource placeholders with real UIDs
