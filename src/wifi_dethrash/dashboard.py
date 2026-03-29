@@ -246,49 +246,49 @@ def _build_panels(
         {
             "id": 5,
             "title": "802.11r/k/v Status",
-            "type": "table",
-            "gridPos": {"h": 6, "w": 12, "x": 12, "y": 24},
+            "type": "stat",
+            "gridPos": {"h": 8, "w": 12, "x": 12, "y": 24},
             "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
             "targets": [
                 {
                     "refId": "A",
                     "expr": f'wifi_iface_ieee80211r_enabled{{instance=~"{instance_re}"}}',
-                    "instant": True,
-                    "format": "table",
+                    "legendFormat": "{{instance}} / {{ssid}} — 802.11r",
                 },
                 {
                     "refId": "B",
                     "expr": f'wifi_iface_ieee80211k_enabled{{instance=~"{instance_re}"}}',
-                    "instant": True,
-                    "format": "table",
+                    "legendFormat": "{{instance}} / {{ssid}} — 802.11k",
                 },
                 {
                     "refId": "C",
                     "expr": f'wifi_iface_ieee80211v_enabled{{instance=~"{instance_re}"}}',
-                    "instant": True,
-                    "format": "table",
+                    "legendFormat": "{{instance}} / {{ssid}} — 802.11v",
                 },
             ],
             "fieldConfig": {
-                "defaults": {},
-                "overrides": [
-                    {
-                        "matcher": {"id": "byRegexp", "options": "Value.*"},
-                        "properties": [
-                            {"id": "mappings", "value": [
-                                {"type": "value", "options": {"0": {"text": "Off"}, "1": {"text": "On"}}},
-                            ]},
+                "defaults": {
+                    "mappings": [
+                        {"type": "value", "options": {
+                            "0": {"text": "❌", "color": "red"},
+                            "1": {"text": "✅", "color": "green"},
+                        }},
+                    ],
+                    "thresholds": {
+                        "mode": "absolute",
+                        "steps": [
+                            {"color": "red", "value": None},
+                            {"color": "green", "value": 1},
                         ],
                     },
-                ],
-            },
-            "options": {},
-            "transformations": [
-                {
-                    "id": "merge",
-                    "options": {},
                 },
-            ],
+                "overrides": [],
+            },
+            "options": {
+                "textMode": "value_and_name",
+                "colorMode": "background",
+                "reduceOptions": {"calcs": ["lastNotNull"]},
+            },
         },
         {
             "id": 6,
