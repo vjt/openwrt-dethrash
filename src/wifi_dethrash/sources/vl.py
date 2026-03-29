@@ -1,6 +1,7 @@
 import json
 import logging
 import re
+import socket
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -107,8 +108,6 @@ class VictoriaLogsClient:
         client-provided hostname when IP is available.
         Returns dict mapping lowercase colon-separated MAC to hostname.
         """
-        import socket
-
         resp = self._client.get(
             f"{self._base_url}/select/logsql/query",
             params={

@@ -2,6 +2,7 @@ import re
 import ssl
 import sys
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import NoReturn
 
 import click
@@ -11,6 +12,8 @@ import truststore
 truststore.inject_into_ssl()
 
 from wifi_dethrash.config import CONFIG_PATH, load_config
+from wifi_dethrash.dashboard import generate_dashboard, generate_dashboard_api
+from wifi_dethrash.grafana import GrafanaClient
 from wifi_dethrash.sources.vm import VictoriaMetricsClient
 from wifi_dethrash.sources.vl import VictoriaLogsClient
 from wifi_dethrash.analyzers.thrashing import ThrashingDetector
@@ -77,8 +80,6 @@ def main(config_path, vm_url, vl_url, grafana_url, grafana_api_key,
          mesh_ssids, window, host_label, mac, generate_dashboard,
          push_dashboard, annotate, overlap_threshold, snr_threshold, rssi_floor):
     """WiFi mesh thrashing analyzer for OpenWrt."""
-    from pathlib import Path
-
     cfg = load_config(Path(config_path) if config_path else CONFIG_PATH)
 
     # CLI options override config file
@@ -95,7 +96,6 @@ def main(config_path, vm_url, vl_url, grafana_url, grafana_api_key,
             raise click.UsageError("--grafana-api-key required (or set grafana_api_key in config)")
 
     if annotate:
-        from wifi_dethrash.grafana import GrafanaClient
         with GrafanaClient(effective_grafana_url, effective_grafana_api_key) as gf:
             ann_id = gf.annotate(annotate)
         click.echo(f"Annotation created (id={ann_id}): {annotate}")
@@ -139,17 +139,13 @@ def main(config_path, vm_url, vl_url, grafana_url, grafana_api_key,
             click.echo(f"Found {len(aps)} APs: {', '.join(a.hostname for a in aps)}")
 
             if generate_dashboard:
-                from wifi_dethrash.dashboard import generate_dashboard as gen_dash
-                dashboard_json = gen_dash(aps, ap_locations=cfg.aps)
+                dashboard_json = generate_dashboard(aps, ap_locations=cfg.aps)
                 with open(generate_dashboard, "w") as f:
                     f.write(dashboard_json)
                 click.echo(f"Dashboard written to {generate_dashboard}")
                 return
 
             if push_dashboard:
-                from wifi_dethrash.dashboard import generate_dashboard_api
-                from wifi_dethrash.grafana import GrafanaClient
-
                 dash_mac_names: dict[str, str] = {}
                 if effective_vl_url:
                     click.echo("Resolving MAC addresses ...")
