@@ -106,3 +106,53 @@ class TestFetchEvents:
 
         assert events[0].time == "2026-02-16T07:00:00Z"
         assert events[1].time == "2026-02-16T08:00:00Z"
+
+
+DHCP_RESPONSE = (
+    # Technitium format (dash-separated MAC)
+    '{"_msg":"[2026-03-29 13:44:14 UTC] DHCP Server leased IP address [192.168.42.41] to enterprise [84-2F-57-07-9E-3D] for scope: Default","tags.appname":"docker"}\n'
+    '{"_msg":"[2026-03-29 13:38:08 UTC] DHCP Server leased IP address [192.168.42.21] to tv [E0-85-4D-B3-BC-C0] for scope: Default","tags.appname":"docker"}\n'
+    # dnsmasq format (colon-separated MAC)
+    '{"_msg":"DHCPACK(br-lan) 192.168.253.164 7e:0b:7c:b7:30:8e Watch","tags.appname":"dnsmasq-dhcp"}\n'
+)
+
+
+class TestFetchMacNames:
+    def test_parses_technitium_format(self, respx_mock):
+        respx_mock.get("http://vl:9428/select/logsql/query").respond(
+            text=DHCP_RESPONSE,
+        )
+
+        client = VictoriaLogsClient("http://vl:9428")
+        names = client.fetch_mac_names()
+
+        assert names["84:2f:57:07:9e:3d"] == "enterprise"
+        assert names["e0:85:4d:b3:bc:c0"] == "tv"
+
+    def test_parses_dnsmasq_format(self, respx_mock):
+        respx_mock.get("http://vl:9428/select/logsql/query").respond(
+            text=DHCP_RESPONSE,
+        )
+
+        client = VictoriaLogsClient("http://vl:9428")
+        names = client.fetch_mac_names()
+
+        assert names["7e:0b:7c:b7:30:8e"] == "Watch"
+
+    def test_all_macs_lowercase(self, respx_mock):
+        respx_mock.get("http://vl:9428/select/logsql/query").respond(
+            text=DHCP_RESPONSE,
+        )
+
+        client = VictoriaLogsClient("http://vl:9428")
+        names = client.fetch_mac_names()
+
+        assert all(k == k.lower() for k in names)
+
+    def test_empty_response(self, respx_mock):
+        respx_mock.get("http://vl:9428/select/logsql/query").respond(text="")
+
+        client = VictoriaLogsClient("http://vl:9428")
+        names = client.fetch_mac_names()
+
+        assert names == {}

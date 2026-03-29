@@ -15,6 +15,14 @@ from wifi_dethrash.sources.vm import NoiseReading, TxPowerReading
 MIN_OVERLAP_SAMPLES = 5
 
 
+def _format_mac(mac: str, mac_names: dict[str, str]) -> str:
+    """Format MAC with hostname if known."""
+    name = mac_names.get(mac)
+    if name:
+        return f"{mac} ({name})"
+    return mac
+
+
 def render_report(
     *,
     thrash: list[ThrashSequence],
@@ -24,7 +32,9 @@ def render_report(
     usteer_commands: list[UCICommand] | None = None,
     txpower: list[TxPowerReading] | None = None,
     noise: list[NoiseReading] | None = None,
+    mac_names: dict[str, str] | None = None,
 ) -> str:
+    names = mac_names or {}
     buf = StringIO()
     console = Console(file=buf, force_terminal=True, width=100)
 
@@ -37,13 +47,13 @@ def render_report(
         _render_network_state(console, txpower or [], noise or [])
 
     # Thrashing
-    _render_thrashing(console, thrash)
+    _render_thrashing(console, thrash, names)
 
     # Overlap
-    _render_overlap(console, overlap)
+    _render_overlap(console, overlap, names)
 
     # Weak associations
-    _render_weak(console, weak)
+    _render_weak(console, weak, names)
 
     # Recommendations
     _render_recommendations(console, plan, usteer_commands)
@@ -89,7 +99,7 @@ def _render_network_state(
         console.print()
 
 
-def _render_thrashing(console: Console, thrash: list[ThrashSequence]) -> None:
+def _render_thrashing(console: Console, thrash: list[ThrashSequence], mac_names: dict[str, str]) -> None:
     table = Table(title="Thrashing Summary", title_style="bold yellow",
                   border_style="dim")
     table.add_column("MAC", style="dim")
@@ -106,7 +116,7 @@ def _render_thrashing(console: Console, thrash: list[ThrashSequence]) -> None:
     agg = _aggregate_thrashing(thrash)
     for mac, pair, total, episodes, first, last in agg:
         table.add_row(
-            mac,
+            _format_mac(mac, mac_names),
             f"{pair[0]} \u2194 {pair[1]}",
             str(total),
             str(episodes),
@@ -117,7 +127,7 @@ def _render_thrashing(console: Console, thrash: list[ThrashSequence]) -> None:
     console.print()
 
 
-def _render_overlap(console: Console, overlap: list[OverlapResult]) -> None:
+def _render_overlap(console: Console, overlap: list[OverlapResult], mac_names: dict[str, str]) -> None:
     significant = [o for o in overlap if o.overlap_count >= MIN_OVERLAP_SAMPLES]
 
     table = Table(title="RSSI Overlap (significant)",
@@ -136,7 +146,7 @@ def _render_overlap(console: Console, overlap: list[OverlapResult]) -> None:
     for o in significant:
         pct = round(o.overlap_count / o.total_samples * 100) if o.total_samples else 0
         table.add_row(
-            o.mac,
+            _format_mac(o.mac, mac_names),
             f"{o.ap_pair[0]} \u2194 {o.ap_pair[1]}",
             f"{o.rssi_diff} dB",
             f"{o.overlap_count}/{o.total_samples} ({pct}%)",
@@ -150,7 +160,7 @@ def _render_overlap(console: Console, overlap: list[OverlapResult]) -> None:
     console.print()
 
 
-def _render_weak(console: Console, weak: list[WeakAssociation]) -> None:
+def _render_weak(console: Console, weak: list[WeakAssociation], mac_names: dict[str, str]) -> None:
     if not weak:
         console.print("[green]No weak associations.[/green]")
         console.print()
@@ -166,7 +176,7 @@ def _render_weak(console: Console, weak: list[WeakAssociation]) -> None:
     for w in weak:
         snr_style = "red bold" if w.avg_snr < 10 else "yellow"
         table.add_row(
-            w.mac, w.ap,
+            _format_mac(w.mac, mac_names), w.ap,
             Text(f"{w.avg_snr} dB", style=snr_style),
             str(w.sample_count),
         )

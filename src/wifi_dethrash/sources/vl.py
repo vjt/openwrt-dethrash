@@ -14,6 +14,16 @@ _MSG_RE = re.compile(
     r"(?: auth_alg=(\w+))?"
 )
 
+# dnsmasq: DHCPACK(br-lan) 192.168.42.41 84:2f:57:07:9e:3d enterprise
+_DNSMASQ_DHCP_RE = re.compile(
+    r"DHCPACK\(\S+\)\s+\S+\s+([0-9a-fA-F:]{17})\s+(\S+)"
+)
+
+# Technitium: DHCP Server leased IP address [192.168.42.41] to enterprise [84-2F-57-07-9E-3D]
+_TECHNITIUM_DHCP_RE = re.compile(
+    r"DHCP Server leased IP address \[\S+\] to (\S+) \[([0-9a-fA-F-]{17})\]"
+)
+
 
 @dataclass(frozen=True)
 class HostapdEvent:
@@ -88,3 +98,49 @@ class VictoriaLogsClient:
 
         events.sort(key=lambda e: e.time)
         return events
+
+    def fetch_mac_names(self, limit: int = 10000) -> dict[str, str]:
+        """Resolve MAC addresses to hostnames from DHCP logs.
+
+        Parses both Technitium and dnsmasq DHCP log formats.
+        Returns dict mapping lowercase colon-separated MAC to hostname.
+        """
+        resp = self._client.get(
+            f"{self._base_url}/select/logsql/query",
+            params={
+                "query": (
+                    "(tags.appname:docker AND _msg:\"DHCP Server leased\")"
+                    " OR "
+                    "(tags.appname:dnsmasq-dhcp AND _msg:DHCPACK)"
+                ),
+                "limit": str(limit),
+            },
+        )
+        resp.raise_for_status()
+
+        names: dict[str, str] = {}
+        for line in resp.text.strip().split("\n"):
+            if not line:
+                continue
+            try:
+                row = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            msg = row.get("_msg", "")
+
+            # Technitium: DHCP Server leased IP address [x] to hostname [AA-BB-CC-DD-EE-FF]
+            m = _TECHNITIUM_DHCP_RE.search(msg)
+            if m:
+                hostname = m.group(1)
+                mac = m.group(2).replace("-", ":").lower()
+                names[mac] = hostname
+                continue
+
+            # dnsmasq: DHCPACK(br-lan) ip aa:bb:cc:dd:ee:ff hostname
+            m = _DNSMASQ_DHCP_RE.search(msg)
+            if m:
+                mac = m.group(1).lower()
+                hostname = m.group(2)
+                names[mac] = hostname
+
+        return names

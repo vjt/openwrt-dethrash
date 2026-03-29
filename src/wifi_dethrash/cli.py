@@ -174,11 +174,14 @@ def main(config_path, vm_url, vl_url, grafana_url, grafana_api_key,
         with VictoriaLogsClient(effective_vl_url) as vl:
             click.echo("Fetching hostapd events ...")
             events = vl.fetch_events(start, end, macs=macs)
+
+            click.echo("Resolving MAC addresses ...")
+            mac_names = vl.fetch_mac_names()
     except (httpx.HTTPStatusError, httpx.ConnectError, httpx.TimeoutException,
             ssl.SSLError) as exc:
         _handle_error(f"VictoriaLogs ({effective_vl_url})", exc)
 
-    click.echo(f"Got {len(rssi)} RSSI readings, {len(events)} hostapd events.")
+    click.echo(f"Got {len(rssi)} RSSI readings, {len(events)} hostapd events, {len(mac_names)} MAC names.")
 
     click.echo("Analyzing ...")
     thrash = ThrashingDetector().detect(events)
@@ -194,4 +197,5 @@ def main(config_path, vm_url, vl_url, grafana_url, grafana_api_key,
         thrash=thrash, overlap=overlap, weak=weak,
         plan=txpower_plan, usteer_commands=usteer_commands,
         txpower=txpower, noise=noise,
+        mac_names=mac_names,
     ))
