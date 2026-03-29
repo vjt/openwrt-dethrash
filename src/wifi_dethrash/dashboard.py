@@ -189,6 +189,7 @@ def _build_panels(
                         ' | extract "AP-STA-CONNECTED <mac> auth_alg=<auth>" from _msg'
                         ' | format "🟢 <mac> ▸ <tags.hostname> (<auth>)" as _msg'
                         + _logsql_replace_chain(mac_names)
+                        + ' | filter _msg:re("$station")'
                     ),
                 },
                 {
@@ -198,6 +199,7 @@ def _build_panels(
                         ' | extract "AP-STA-DISCONNECTED <mac>" from _msg'
                         ' | format "🔴 <mac> ◂ <tags.hostname>" as _msg'
                         + _logsql_replace_chain(mac_names)
+                        + ' | filter _msg:re("$station")'
                     ),
                 },
             ],
