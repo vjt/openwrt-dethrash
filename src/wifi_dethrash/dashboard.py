@@ -175,7 +175,7 @@ def _build_panels(
                 {
                     "refId": "A",
                     "expr": (
-                        'tags.appname:hostapd AND _msg:AP-STA-CONNECTED AND fields.station:re("$station")'
+                        'tags.appname:hostapd AND _msg:AP-STA-CONNECTED AND fields.station:*'
                         ' | extract "AP-STA-CONNECTED <mac> auth_alg=<auth>" from _msg'
                         ' | format "🟢 <_time> <fields.station> (<mac>) ▸ <tags.hostname> (<auth>)" as _msg'
                     ),
@@ -183,7 +183,7 @@ def _build_panels(
                 {
                     "refId": "B",
                     "expr": (
-                        'tags.appname:hostapd AND _msg:AP-STA-DISCONNECTED AND fields.station:re("$station")'
+                        'tags.appname:hostapd AND _msg:AP-STA-DISCONNECTED AND fields.station:*'
                         ' | extract "AP-STA-DISCONNECTED <mac>" from _msg'
                         ' | format "🔴 <_time> <fields.station> (<mac>) ◂ <tags.hostname>" as _msg'
                     ),
