@@ -247,38 +247,35 @@ def _build_panels(
             "id": 5,
             "title": "802.11r/k/v Status",
             "type": "stat",
-            "gridPos": {"h": 8, "w": 12, "x": 12, "y": 24},
+            "gridPos": {"h": 4, "w": 12, "x": 12, "y": 24},
             "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
             "targets": [
                 {
                     "refId": "A",
-                    "expr": f'wifi_iface_ieee80211r_enabled{{instance=~"{instance_re}"}}',
-                    "legendFormat": "{{instance}} / {{ssid}} — 802.11r",
-                },
-                {
-                    "refId": "B",
-                    "expr": f'wifi_iface_ieee80211k_enabled{{instance=~"{instance_re}"}}',
-                    "legendFormat": "{{instance}} / {{ssid}} — 802.11k",
-                },
-                {
-                    "refId": "C",
-                    "expr": f'wifi_iface_ieee80211v_enabled{{instance=~"{instance_re}"}}',
-                    "legendFormat": "{{instance}} / {{ssid}} — 802.11v",
+                    "expr": (
+                        f'wifi_iface_ieee80211r_enabled{{instance=~"{instance_re}"}}'
+                        f' + on(instance, device, ifname, ssid) wifi_iface_ieee80211k_enabled'
+                        f' + on(instance, device, ifname, ssid) wifi_iface_ieee80211v_enabled'
+                    ),
+                    "legendFormat": "{{instance}} / {{ssid}}",
                 },
             ],
             "fieldConfig": {
                 "defaults": {
                     "mappings": [
                         {"type": "value", "options": {
-                            "0": {"text": "❌", "color": "red"},
-                            "1": {"text": "✅", "color": "green"},
+                            "0": {"text": "❌ disabled", "color": "red"},
+                            "1": {"text": "⚠️ 1/3", "color": "yellow"},
+                            "2": {"text": "⚠️ 2/3", "color": "yellow"},
+                            "3": {"text": "✅ r/k/v", "color": "green"},
                         }},
                     ],
                     "thresholds": {
                         "mode": "absolute",
                         "steps": [
                             {"color": "red", "value": None},
-                            {"color": "green", "value": 1},
+                            {"color": "yellow", "value": 1},
+                            {"color": "green", "value": 3},
                         ],
                     },
                 },
