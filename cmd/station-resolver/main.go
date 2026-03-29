@@ -44,31 +44,20 @@ type resolver struct {
 	names map[string]string // lowercase colon-separated MAC → hostname
 }
 
-// lease represents a DHCP lease entry from Technitium.
-type lease struct {
-	HardwareAddress string `json:"hardwareAddress"`
-	HostName        string `json:"hostName"`
-	Type            string `json:"type"` // "Reserved" or "Dynamic"
-}
-
-// scopeResponse is the API response for /api/dhcp/scopes/get (reserved leases).
+// scopeResponse is the API response for /api/dhcp/scopes/get.
 type scopeResponse struct {
 	Status   string `json:"status"`
 	Response struct {
-		ReservedLeases []lease `json:"reservedLeases"`
+		ReservedLeases []struct {
+			HardwareAddress string `json:"hardwareAddress"`
+			HostName        string `json:"hostName"`
+		} `json:"reservedLeases"`
 	} `json:"response"`
 }
 
-// leasesResponse is the API response for /api/dhcp/leases/list (active leases).
-type leasesResponse struct {
-	Status   string `json:"status"`
-	Response struct {
-		Leases []lease `json:"leases"`
-	} `json:"response"`
-}
-
-func (r *resolver) apiGet(path string, result any) error {
-	url := fmt.Sprintf("%s%s?token=%s&name=%s", technitiumURL, path, technitiumToken, dhcpScope)
+func (r *resolver) refresh() error {
+	url := fmt.Sprintf("%s/api/dhcp/scopes/get?token=%s&name=%s",
+		technitiumURL, technitiumToken, dhcpScope)
 
 	client := &http.Client{
 		Timeout: 10 * time.Second,
@@ -79,7 +68,7 @@ func (r *resolver) apiGet(path string, result any) error {
 
 	resp, err := client.Get(url)
 	if err != nil {
-		return fmt.Errorf("technitium API %s: %w", path, err)
+		return fmt.Errorf("technitium API: %w", err)
 	}
 	defer resp.Body.Close()
 
@@ -88,49 +77,21 @@ func (r *resolver) apiGet(path string, result any) error {
 		return fmt.Errorf("reading response: %w", err)
 	}
 
-	return json.Unmarshal(body, result)
-}
-
-func normalizeLease(l lease) (mac, host string) {
-	mac = strings.ToLower(strings.ReplaceAll(l.HardwareAddress, "-", ":"))
-	host = l.HostName
-	if idx := strings.Index(host, "."); idx > 0 {
-		host = host[:idx]
-	}
-	return
-}
-
-func (r *resolver) refresh() error {
-	// 1. Reserved leases (static reservations — authoritative names)
-	var scope scopeResponse
-	if err := r.apiGet("/api/dhcp/scopes/get", &scope); err != nil {
-		return err
-	}
-	if scope.Status != "ok" {
-		return fmt.Errorf("scopes API status: %s", scope.Status)
+	var data scopeResponse
+	if err := json.Unmarshal(body, &data); err != nil {
+		return fmt.Errorf("parsing JSON: %w", err)
 	}
 
-	// 2. Active leases (dynamic — guests, new devices)
-	var active leasesResponse
-	if err := r.apiGet("/api/dhcp/leases/list", &active); err != nil {
-		log.Printf("warning: could not fetch active leases: %v", err)
-		// Non-fatal — reserved leases are enough
+	if data.Status != "ok" {
+		return fmt.Errorf("API status: %s", data.Status)
 	}
 
-	// Dynamic leases first, then reserved override (reserved wins)
-	names := make(map[string]string)
-	if active.Status == "ok" {
-		for _, l := range active.Response.Leases {
-			mac, host := normalizeLease(l)
-			if host != "" {
-				names[mac] = host
-			}
-		}
-	}
-	for _, l := range scope.Response.ReservedLeases {
-		mac, host := normalizeLease(l)
-		if host != "" {
-			names[mac] = host
+	names := make(map[string]string, len(data.Response.ReservedLeases))
+	for _, lease := range data.Response.ReservedLeases {
+		mac := strings.ToLower(strings.ReplaceAll(lease.HardwareAddress, "-", ":"))
+		host := lease.HostName
+		if idx := strings.Index(host, "."); idx > 0 {
+			host = host[:idx]
 		}
 		names[mac] = host
 	}
