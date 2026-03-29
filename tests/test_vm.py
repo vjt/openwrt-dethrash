@@ -211,6 +211,7 @@ class TestFetchTxPower:
         assert r1.configured_txpower == 23
         assert r1.channel == 149
         assert r1.frequency_mhz == 5745
+        assert r1.ssid == "MyNet"
 
     def test_works_without_configured_txpower(self, respx_mock):
         respx_mock.get("http://vm:8428/api/v1/query").mock(
@@ -223,6 +224,7 @@ class TestFetchTxPower:
         assert len(readings) == 1
         assert readings[0].txpower_dbm == 20
         assert readings[0].configured_txpower is None
+        assert readings[0].ssid == ""
 
 
 def _txpower_route(request):

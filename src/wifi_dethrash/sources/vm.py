@@ -37,6 +37,7 @@ class TxPowerReading:
     configured_txpower: int | None
     channel: int
     frequency_mhz: int
+    ssid: str = ""
 
 
 class VictoriaMetricsClient:
@@ -203,6 +204,7 @@ class VictoriaMetricsClient:
                 configured_txpower=configured.get((ap, radio)),
                 channel=channels.get((ap, radio), 0),
                 frequency_mhz=frequencies.get((ap, radio), 0),
+                ssid=m.get("ssid", ""),
             ))
 
         return readings
