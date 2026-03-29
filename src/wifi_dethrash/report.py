@@ -3,7 +3,7 @@ from collections import defaultdict
 from wifi_dethrash.analyzers.thrashing import ThrashSequence
 from wifi_dethrash.analyzers.overlap import OverlapResult
 from wifi_dethrash.analyzers.weak import WeakAssociation
-from wifi_dethrash.recommender import TxPowerRecommendation, UCICommand
+from wifi_dethrash.recommender import TxPowerPlan, UCICommand
 from wifi_dethrash.sources.vm import NoiseReading, TxPowerReading
 
 MIN_OVERLAP_SAMPLES = 5
@@ -14,8 +14,8 @@ def render_report(
     thrash: list[ThrashSequence],
     overlap: list[OverlapResult],
     weak: list[WeakAssociation],
-    txpower_recs: list[TxPowerRecommendation],
-    usteer_commands: list[UCICommand],
+    plan: TxPowerPlan | None = None,
+    usteer_commands: list[UCICommand] | None = None,
     txpower: list[TxPowerReading] | None = None,
     noise: list[NoiseReading] | None = None,
 ) -> str:
@@ -78,58 +78,50 @@ def render_report(
 
     # Recommendations
     lines.append("--- Recommendations ---")
-    if txpower_recs:
-        for i, r in enumerate(txpower_recs, 1):
-            if r.total_thrash_connects >= 50:
-                severity = "CRITICAL"
-            elif r.total_thrash_connects >= 10:
-                severity = "HIGH"
-            else:
-                severity = "MODERATE"
-            lines.append(f"  {i}. {r.ap_pair[0]} <-> {r.ap_pair[1]} ({r.radio}): {severity}")
-            lines.append(f"     {r.total_thrash_connects} thrashing connects across {r.total_thrash_episodes} episodes")
+    has_recs = False
+
+    if plan and plan.changes:
+        has_recs = True
+        lines.append("  Txpower plan:")
+        for c in plan.changes:
+            delta = c.proposed - c.current
+            sign = "+" if delta > 0 else ""
             lines.append(
-                f"     RSSI overlap: {r.avg_rssi_diff} dB avg diff ({r.overlap_pct}% of samples)"
+                f"    {c.ap:<12s} {c.radio}: {c.current} -> {c.proposed} dBm ({sign}{delta})"
             )
+            lines.append(
+                f"      ssh root@{c.ap} uci set wireless.{c.radio}.txpower={c.proposed}"
+            )
+        lines.append("")
 
-            # Show RSSI with optional txpower info
-            a_info = f"{r.avg_rssi_a} dBm"
-            b_info = f"{r.avg_rssi_b} dBm"
-            if r.current_txpower_a is not None:
-                a_info += f" (txpower {r.current_txpower_a} dBm)"
-            if r.current_txpower_b is not None:
-                b_info += f" (txpower {r.current_txpower_b} dBm)"
-            lines.append(f"     {r.ap_pair[0]}: {a_info} | {r.ap_pair[1]}: {b_info}")
-
-            if r.suggested_txpower is not None:
-                target_txp = r.current_txpower_a if r.target_ap == r.ap_pair[0] else r.current_txpower_b
-                verb = "Reduce" if r.action == "reduce" else "Increase"
-                lines.append(
-                    f"     -> {verb} {r.target_ap} {r.radio} txpower: {target_txp} -> {r.suggested_txpower} dBm"
-                )
-                lines.append(
-                    f"        ssh root@{r.target_ap} uci set wireless.{r.radio}.txpower={r.suggested_txpower}"
-                )
-            elif r.skip_reason:
-                lines.append(
-                    f"     -> No txpower change: {r.skip_reason}"
-                )
+        lines.append("  Expected impact on thrashing pairs:")
+        for i in plan.pair_impacts:
+            if i.rssi_diff_after > i.rssi_diff_before + 0.5:
+                mark = "+"
+            elif i.rssi_diff_after < i.rssi_diff_before - 0.5:
+                mark = "-"
             else:
-                lines.append(
-                    f"     -> Consider adjusting txpower on {r.target_ap} ({r.radio})"
-                )
-            lines.append("")
+                mark = "~"
+            covered = "ok" if i.rssi_diff_after >= i.signal_diff_threshold else \
+                      f"< signal_diff {i.signal_diff_threshold}"
+            lines.append(
+                f"    {mark} {i.ap_pair[0]} <-> {i.ap_pair[1]}:  "
+                f"diff {i.rssi_diff_before} -> {i.rssi_diff_after} dB  "
+                f"({i.total_thrash_connects} connects)  [{covered}]"
+            )
+        lines.append("")
 
     if usteer_commands:
-        if txpower_recs:
-            lines.append("  usteer:")
+        has_recs = True
+        lines.append("  usteer:")
         for c in usteer_commands:
-            lines.append(f"  {c}")
-            lines.append(f"    # {c.reason}")
+            lines.append(f"    {c}")
+            lines.append(f"      # {c.reason}")
+        lines.append("")
 
-    if not txpower_recs and not usteer_commands:
+    if not has_recs:
         lines.append("  No changes recommended. Looking clean.")
-    lines.append("")
+        lines.append("")
 
     return "\n".join(lines)
 
