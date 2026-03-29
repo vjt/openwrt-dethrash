@@ -436,21 +436,28 @@ def _build_panels(
 def _station_variable(mac_names: dict[str, str] | None) -> dict[str, object]:
     """Build a station selector variable.
 
-    Uses label_map in the query so the dropdown shows hostnames
-    instead of raw MACs. The selected value is the hostname (after
-    label_map), which matches the label_map'd panel queries.
+    With mac_names: custom variable listing hostnames (label_map'd values).
+    Without: query variable using raw MACs from Prometheus.
     """
     if mac_names:
-        query = f"label_values(label_map(wifi_station_signal_dbm, {_label_map_args(mac_names)}), mac)"
-    else:
-        query = "label_values(wifi_station_signal_dbm, mac)"
+        # Hostnames as values — matches label_match() in panel queries
+        names = sorted(set(mac_names.values()), key=str.lower)
+        return {
+            "name": "station",
+            "label": "Station",
+            "type": "custom",
+            "query": ",".join(names),
+            "includeAll": True,
+            "allValue": ".*",
+            "multi": False,
+        }
 
     return {
         "name": "station",
         "label": "Station",
         "type": "query",
         "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
-        "query": query,
+        "query": "label_values(wifi_station_signal_dbm, mac)",
         "includeAll": True,
         "allValue": ".*",
         "multi": False,
