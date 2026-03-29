@@ -123,10 +123,11 @@ def main(vm_url, vl_url, window, host_label, mac, generate_dashboard,
     rec = Recommender(min_snr_value=snr_threshold, overlap_threshold=overlap_threshold,
                       rssi_floor=rssi_floor)
     txpower_recs = rec.txpower_recommendations(thrash, overlap, txpower=txpower)
-    usteer_commands = rec.usteer_commands(weak)
+    usteer_commands = rec.usteer_commands(weak, overlap, noise, thrash)
 
     click.echo("")
     click.echo(render_report(
         thrash=thrash, overlap=overlap, weak=weak,
         txpower_recs=txpower_recs, usteer_commands=usteer_commands,
+        txpower=txpower, noise=noise,
     ))

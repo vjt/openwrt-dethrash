@@ -3,7 +3,7 @@ from wifi_dethrash.recommender import Recommender, TxPowerRecommendation, UCICom
 from wifi_dethrash.analyzers.thrashing import ThrashSequence
 from wifi_dethrash.analyzers.overlap import OverlapResult
 from wifi_dethrash.analyzers.weak import WeakAssociation
-from wifi_dethrash.sources.vm import TxPowerReading
+from wifi_dethrash.sources.vm import NoiseReading, TxPowerReading
 
 
 class TestTxPowerRecommendation:
@@ -322,20 +322,82 @@ class TestTxPowerRecommendation:
 
 
 class TestUsteerRecommendation:
-    def test_recommends_min_snr_for_weak_associations(self):
-        weak = [WeakAssociation(
+    def test_signal_diff_from_overlap_data(self):
+        """signal_diff_threshold should be derived from thrashing overlap diffs."""
+        thrash = [ThrashSequence(
             mac="aa:bb:cc:dd:ee:01",
-            ap="pingu",
-            avg_snr=8,
-            sample_count=100,
+            ap_pair=("golem", "pingu"),
+            count=20,
+            first_time="T1",
+            last_time="T2",
         )]
+        overlap = [OverlapResult(
+            mac="aa:bb:cc:dd:ee:01",
+            ap_pair=("golem", "pingu"),
+            rssi_diff=4.2,
+            overlap_count=50,
+            total_samples=100,
+            avg_rssi_a=-60,
+            avg_rssi_b=-64,
+            ifname_a="phy1-ap0",
+            ifname_b="phy1-ap0",
+        )]
+        noise = [NoiseReading(ap="golem", radio="radio1", frequency=5500,
+                              noise_dbm=-92, timestamp=1000)]
+        weak = [WeakAssociation(mac="aa:bb:cc:dd:ee:01", ap="pingu",
+                                avg_snr=8, sample_count=100)]
 
         rec = Recommender()
-        commands = rec.usteer_commands(weak)
+        commands = rec.usteer_commands(weak, overlap, noise, thrash)
 
-        assert len(commands) >= 1
-        assert any("min_snr" in c.command or "min_connect_snr" in c.command
-                    for c in commands)
+        sig_diff = [c for c in commands if "signal_diff" in c.command]
+        assert len(sig_diff) == 1
+        # max diff 4.2, int(4.2) + 3 = 7
+        assert "signal_diff_threshold=7" in sig_diff[0].command
+
+    def test_min_snr_from_weak_data(self):
+        """min_connect_snr/min_snr should be derived from weak associations."""
+        thrash: list[ThrashSequence] = []
+        overlap: list[OverlapResult] = []
+        noise = [NoiseReading(ap="golem", radio="radio1", frequency=5500,
+                              noise_dbm=-92, timestamp=1000)]
+        weak = [
+            WeakAssociation(mac="aa:bb:cc:dd:ee:01", ap="pingu",
+                            avg_snr=3, sample_count=100),
+            WeakAssociation(mac="aa:bb:cc:dd:ee:02", ap="golem",
+                            avg_snr=10, sample_count=50),
+        ]
+
+        rec = Recommender()
+        commands = rec.usteer_commands(weak, overlap, noise, thrash)
+
+        connect = [c for c in commands if "min_connect_snr" in c.command]
+        snr = [c for c in commands if c.command.endswith("min_snr=8") or
+               "usteer[0].min_snr=" in c.command and "connect" not in c.command]
+        assert len(connect) == 1
+        # worst functional = 3, +2 = 5, but clamped to min 8
+        assert "min_connect_snr=8" in connect[0].command
+
+    def test_roam_thresholds_from_noise(self):
+        """roam_scan/trigger_snr should be included when noise data exists."""
+        noise = [
+            NoiseReading(ap="golem", radio="radio1", frequency=5500,
+                         noise_dbm=-92, timestamp=1000),
+            NoiseReading(ap="pingu", radio="radio1", frequency=5180,
+                         noise_dbm=-91, timestamp=1000),
+        ]
+        weak = [WeakAssociation(mac="aa:bb:cc:dd:ee:01", ap="pingu",
+                                avg_snr=8, sample_count=100)]
+
+        rec = Recommender()
+        commands = rec.usteer_commands(weak, [], noise, [])
+
+        roam_scan = [c for c in commands if "roam_scan_snr" in c.command]
+        roam_trigger = [c for c in commands if "roam_trigger_snr" in c.command]
+        assert len(roam_scan) == 1
+        assert "roam_scan_snr=25" in roam_scan[0].command
+        assert len(roam_trigger) == 1
+        assert "roam_trigger_snr=15" in roam_trigger[0].command
 
 
 class TestUCICommand:

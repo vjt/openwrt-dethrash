@@ -4,6 +4,7 @@ from wifi_dethrash.analyzers.thrashing import ThrashSequence
 from wifi_dethrash.analyzers.overlap import OverlapResult
 from wifi_dethrash.analyzers.weak import WeakAssociation
 from wifi_dethrash.recommender import TxPowerRecommendation, UCICommand
+from wifi_dethrash.sources.vm import NoiseReading, TxPowerReading
 
 MIN_OVERLAP_SAMPLES = 5
 
@@ -15,12 +16,20 @@ def render_report(
     weak: list[WeakAssociation],
     txpower_recs: list[TxPowerRecommendation],
     usteer_commands: list[UCICommand],
+    txpower: list[TxPowerReading] | None = None,
+    noise: list[NoiseReading] | None = None,
 ) -> str:
     lines: list[str] = []
     lines.append("=" * 60)
     lines.append("  wifi-dethrash report")
     lines.append("=" * 60)
     lines.append("")
+
+    # Network state table
+    if txpower or noise:
+        lines.append("--- Network state ---")
+        lines.extend(_render_network_state(txpower or [], noise or []))
+        lines.append("")
 
     # Thrashing — aggregated by (mac, ap_pair)
     lines.append("--- Thrashing summary ---")
@@ -122,6 +131,41 @@ def render_report(
     lines.append("")
 
     return "\n".join(lines)
+
+
+def _render_network_state(
+    txpower: list[TxPowerReading],
+    noise: list[NoiseReading],
+) -> list[str]:
+    """Render a per-AP, per-radio network state table."""
+    # Build noise lookup: (ap, radio) -> latest noise reading
+    noise_by_ap_radio: dict[tuple[str, str], int] = {}
+    for n in noise:
+        key = (n.ap, n.radio)
+        noise_by_ap_radio[key] = n.noise_dbm
+
+    # Build rows from txpower data (one row per AP+radio)
+    rows: list[tuple[str, str, int, int, str, int | None]] = []
+    for t in txpower:
+        noise_val = noise_by_ap_radio.get((t.ap, t.radio))
+        band = "5 GHz" if t.frequency_mhz > 4000 else "2.4 GHz"
+        rows.append((t.ap, t.radio, t.channel, t.txpower_dbm, band, noise_val))
+
+    rows.sort(key=lambda r: (r[4], r[0], r[1]))
+
+    lines: list[str] = []
+    current_band = ""
+    for ap, radio, channel, txp, band, noise_val in rows:
+        if band != current_band:
+            current_band = band
+            lines.append(f"  {band}:")
+            lines.append(f"    {'AP':<12s} {'Radio':<8s} {'Ch':>4s} {'TxPwr':>6s} {'Noise':>6s}")
+            lines.append(f"    {'—'*12} {'—'*8} {'—'*4} {'—'*6} {'—'*6}")
+        noise_str = f"{noise_val}" if noise_val is not None else "?"
+        lines.append(
+            f"    {ap:<12s} {radio:<8s} {channel:>4d} {txp:>4d} dB {noise_str:>4s} dB"
+        )
+    return lines
 
 
 def _aggregate_thrashing(
