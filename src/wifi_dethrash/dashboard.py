@@ -94,6 +94,16 @@ def _label_map_args(mac_names: dict[str, str]) -> str:
     return f'"mac", {pairs}'
 
 
+def _logsql_replace_chain(mac_names: dict[str, str] | None) -> str:
+    """Build LogsQL replace pipe chain for MAC→hostname in log messages."""
+    if not mac_names:
+        return ""
+    return " | " + " | ".join(
+        f'replace ("{mac}", "{name}")'
+        for mac, name in sorted(mac_names.items())
+    )
+
+
 def _wrap_label_map(expr: str, mac_names: dict[str, str] | None) -> str:
     """Wrap a PromQL expression with label_map() and station filter.
 
@@ -174,8 +184,22 @@ def _build_panels(
             "targets": [
                 {
                     "refId": "A",
-                    "expr": "tags.appname:hostapd AND _msg:AP-STA-",
-                }
+                    "expr": (
+                        'tags.appname:hostapd AND _msg:AP-STA-CONNECTED'
+                        ' | extract "AP-STA-CONNECTED <mac> auth_alg=<auth>" from _msg'
+                        ' | format "<mac> \u2192 <tags.hostname> (<auth>)" as _msg'
+                        + _logsql_replace_chain(mac_names)
+                    ),
+                },
+                {
+                    "refId": "B",
+                    "expr": (
+                        'tags.appname:hostapd AND _msg:AP-STA-DISCONNECTED'
+                        ' | extract "AP-STA-DISCONNECTED <mac>" from _msg'
+                        ' | format "<mac> \u2190 <tags.hostname>" as _msg'
+                        + _logsql_replace_chain(mac_names)
+                    ),
+                },
             ],
             "options": {},
         },
