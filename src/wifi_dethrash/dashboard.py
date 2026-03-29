@@ -83,16 +83,13 @@ def _build_topology_panel(
 
 def _mac_transforms(mac_names: dict[str, str]) -> list[dict[str, object]]:
     """Build Grafana renameByRegex transformations for MAC→hostname."""
-    transforms: list[dict[str, object]] = []
-    for mac, name in sorted(mac_names.items()):
-        transforms.append({
+    return [
+        {
             "id": "renameByRegex",
-            "options": {
-                "regex": f"(.*){mac}(.*)",
-                "renamePattern": f"$1{name}$2",
-            },
-        })
-    return transforms
+            "options": {"regex": mac, "renamePattern": name},
+        }
+        for mac, name in sorted(mac_names.items())
+    ]
 
 
 def _build_panels(
