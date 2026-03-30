@@ -3,6 +3,11 @@
 ## 0.3.0 — 2026-03-30
 
 ### Added
+- **Station-resolver `/metrics` endpoint** — serves `wifi_station_name` gauge
+  with `{mac, station}` labels for dynamic MAC→hostname resolution. Telegraf
+  scrapes this and forwards to VictoriaMetrics, enabling `group_left(station)`
+  joins in dashboard queries. No more re-pushing dashboard when new devices
+  connect.
 - **Hearing Map panel** — signal strength of selected station as seen by all APs,
   showing usteer's roaming decision data.
 - **Channel Load panel** — channel utilization per AP radio from usteer.
@@ -38,6 +43,12 @@
   no longer injects `mac=~"$station"` in file-export format (no mac_names).
 
 ### Changed
+- **Dashboard: `group_left(station)` replaces baked-in `label_map`** — Prometheus
+  panels now join with `wifi_station_name_gauge` (from station-resolver /metrics)
+  instead of hardcoded MAC→hostname mappings. Dashboard is fully dynamic.
+- **`--push-dashboard` no longer needs VictoriaLogs** — only needs VM for AP
+  discovery and Grafana for datasource UIDs. VL URL is only required for
+  analysis mode.
 - Dashboard reorganized: 13 panels (was 12), usteer visibility section added
   between signal quality and events/clients.
 - Panel ID sequence: 1-13 in order of appearance.

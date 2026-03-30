@@ -16,7 +16,7 @@ src/wifi_dethrash/
   grafana.py          # Grafana API client (datasource discovery, dashboard push)
   sources/
     vm.py             # VictoriaMetrics client (RSSI, noise, AP discovery, txpower)
-    vl.py             # VictoriaLogs client (hostapd events)
+    vl.py             # VictoriaLogs client (hostapd events, station resolution)
   analyzers/
     thrashing.py      # Detects AP-pair bouncing from hostapd events
     overlap.py        # Finds RSSI overlap between AP pairs
@@ -25,6 +25,11 @@ src/wifi_dethrash/
   report.py           # Terminal report renderer (aggregated, filtered)
   dashboard.py        # Grafana dashboard generator (file-import + API formats, 13 panels)
   utils.py            # ifname_to_radio helper
+cmd/
+  station-resolver/    # Go binary: Telegraf execd processor + /metrics endpoint
+    main.go            # MAC→hostname from Technitium DHCP, serves wifi_station_name gauge
+    main_test.go
+    go.mod
 openwrt/
   Makefile             # OpenWrt SDK package Makefile
   files/usr/lib/lua/prometheus-collectors/
@@ -96,7 +101,7 @@ tests/
 ## Commands
 
 ```bash
-.venv/bin/pytest -v              # run tests (93 tests, ~0.6s)
+.venv/bin/pytest -v              # run tests (93 tests, ~0.8s)
 .venv/bin/pyright src/ tests/    # type check (zero errors)
 .venv/bin/wifi-dethrash --help   # CLI help
 ```
@@ -113,7 +118,9 @@ tests/
 - Recommendations require BOTH thrashing AND overlap for a pair (no false positives)
 - Txpower suggestions: reduce louder AP by (overlap_threshold - rssi_diff + 2), clamped to [5, current - 2]
 - Grafana dashboard: 13 panels, file-import format (--generate-dashboard) with __inputs, or API format (--push-dashboard) with real datasource UIDs
+- Dashboard MAC→hostname: `group_left(station)` join against `wifi_station_name_gauge` from station-resolver /metrics — no baked-in label_map, fully dynamic
 - Station dropdown: dynamic VL field_values query, single variable with allValue=".*" works for both Prometheus and VL panels
+- `--push-dashboard` does not require VL URL — only needs VM (AP discovery) and Grafana (datasource UIDs)
 - Config file (TOML) provides URLs, Grafana credentials, mesh SSIDs, and AP floor plan
 - SSID filtering: only APs broadcasting configured mesh SSIDs are included in analysis
 - Report aggregates thrashing by (mac, ap_pair) and filters overlap to >= 5 samples
@@ -125,7 +132,8 @@ tests/
   `wifi_radio_channel`, `wifi_radio_frequency_mhz`,
   `wifi_usteer_hearing_signal_dbm`, `wifi_usteer_hearing_connected`,
   `wifi_usteer_roam_events_source`, `wifi_usteer_roam_events_target`,
-  `wifi_usteer_load`, `wifi_usteer_associated_clients`
+  `wifi_usteer_load`, `wifi_usteer_associated_clients`,
+  `wifi_station_name_gauge` (from station-resolver, labels: `mac`, `station`)
 - VictoriaLogs: hostapd `AP-STA-CONNECTED` / `AP-STA-DISCONNECTED` events
   (enriched with `fields.station` by station-resolver)
 - Instance label format: `hostname:9100` (configurable via --host-label)
@@ -140,6 +148,21 @@ Deployed on each AP as a prometheus-node-exporter-lua collector. Exports:
 - Reverse DNS via nixio (cached, failures retried next scrape)
 - Each AP exports only its own local_info metrics; remote_info used only for node-map resolution
 
+## Station resolver (cmd/station-resolver/)
+
+Go binary with dual role in the Telegraf pipeline:
+- **execd processor**: reads influx line protocol on stdin, enriches hostapd
+  AP-STA-CONNECTED/DISCONNECTED lines with `station=<hostname>` field, writes
+  to stdout. VictoriaLogs stores these as `fields.station`.
+- **/metrics endpoint**: serves `wifi_station_name{mac, station} 1` gauge.
+  Telegraf scrapes this via `inputs.prometheus` and forwards to VictoriaMetrics
+  (stored as `wifi_station_name_gauge` after Telegraf type suffix).
+
+MAC→hostname mapping fetched from Technitium DHCP reserved leases API,
+refreshed every minute. Only reserved leases — unknown MACs get no station
+field. Config via env vars: `TECHNITIUM_TOKEN`, `TECHNITIUM_URL`,
+`DHCP_SCOPE`, `REFRESH_INTERVAL`, `METRICS_ADDR`.
+
 ## OpenWrt environment
 
 - Target: OpenWrt 24.10.x (snapshot)
@@ -152,6 +175,6 @@ Deployed on each AP as a prometheus-node-exporter-lua collector. Exports:
 - Grafana 12 file-import rejects JSON wrapped in `{"dashboard": {...}}` — use bare JSON
 - Grafana 12 API push requires `{"dashboard": {...}, "overwrite": true}` wrapper (opposite of file-import)
 - Grafana 12 requires schemaVersion >= 39, panel `id` fields, and `refId` on targets
-- `--vl-url` is optional when using `--generate-dashboard` (only needs VM to discover APs)
+- `--vl-url` is optional for `--generate-dashboard` and `--push-dashboard` (only needs VM to discover APs; push also needs Grafana for datasource UIDs)
 - txpower fetch uses instant query (`/api/v1/query`), not range query
 - configured_txpower, channel, frequency are optional — graceful degradation via try/except
