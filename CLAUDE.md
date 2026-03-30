@@ -23,15 +23,15 @@ src/wifi_dethrash/
     weak.py           # Finds low-SNR associations
   recommender.py      # Generates txpower + usteer recommendations
   report.py           # Terminal report renderer (aggregated, filtered)
-  dashboard.py        # Grafana dashboard generator (file-import + API formats, 12 panels)
+  dashboard.py        # Grafana dashboard generator (file-import + API formats, 13 panels)
   utils.py            # ifname_to_radio helper
 openwrt/
   Makefile             # OpenWrt SDK package Makefile
   files/usr/lib/lua/prometheus-collectors/
-    wifi_dethrash.lua  # Prometheus collector deployed on OpenWrt APs
+    wifi_dethrash.lua  # Prometheus collector deployed on OpenWrt APs (radio, UCI, usteer runtime)
 tests/
   conftest.py         # respx mock fixture
-  test_*.py           # One test file per module (99 tests)
+  test_*.py           # One test file per module (93 tests)
 ```
 
 ## Engineering Standards
@@ -96,7 +96,7 @@ tests/
 ## Commands
 
 ```bash
-.venv/bin/pytest -v              # run tests (99 tests, ~0.6s)
+.venv/bin/pytest -v              # run tests (93 tests, ~0.6s)
 .venv/bin/pyright src/ tests/    # type check (zero errors)
 .venv/bin/wifi-dethrash --help   # CLI help
 ```
@@ -112,7 +112,8 @@ tests/
 - MAC addresses normalized to lowercase throughout
 - Recommendations require BOTH thrashing AND overlap for a pair (no false positives)
 - Txpower suggestions: reduce louder AP by (overlap_threshold - rssi_diff + 2), clamped to [5, current - 2]
-- Grafana dashboard: file-import format (--generate-dashboard) with __inputs, or API format (--push-dashboard) with real datasource UIDs
+- Grafana dashboard: 13 panels, file-import format (--generate-dashboard) with __inputs, or API format (--push-dashboard) with real datasource UIDs
+- Station dropdown: dynamic VL field_values query, single variable with allValue=".*" works for both Prometheus and VL panels
 - Config file (TOML) provides URLs, Grafana credentials, mesh SSIDs, and AP floor plan
 - SSID filtering: only APs broadcasting configured mesh SSIDs are included in analysis
 - Report aggregates thrashing by (mac, ap_pair) and filters overlap to >= 5 samples
@@ -121,8 +122,12 @@ tests/
 
 - VictoriaMetrics: `wifi_station_signal_dbm`, `wifi_network_noise_dbm`,
   `wifi_radio_txpower_dbm`, `wifi_radio_configured_txpower`,
-  `wifi_radio_channel`, `wifi_radio_frequency_mhz`
+  `wifi_radio_channel`, `wifi_radio_frequency_mhz`,
+  `wifi_usteer_hearing_signal_dbm`, `wifi_usteer_hearing_connected`,
+  `wifi_usteer_roam_events_source`, `wifi_usteer_roam_events_target`,
+  `wifi_usteer_load`, `wifi_usteer_associated_clients`
 - VictoriaLogs: hostapd `AP-STA-CONNECTED` / `AP-STA-DISCONNECTED` events
+  (enriched with `fields.station` by station-resolver)
 - Instance label format: `hostname:9100` (configurable via --host-label)
 
 ## Lua collector (openwrt/wifi_dethrash.lua)
@@ -130,7 +135,10 @@ tests/
 Deployed on each AP as a prometheus-node-exporter-lua collector. Exports:
 - Radio metrics via iwinfo+ubus: txpower, txpower_offset, channel, frequency
 - UCI wireless config: configured_txpower, 802.11r/k/v enabled
+- usteer runtime data via ubus: hearing map signal, roam events, channel load, associated clients
 - UCI usteer config: SNR thresholds, signal_diff, load_kick, band_steering
+- Reverse DNS via nixio (cached, failures retried next scrape)
+- Each AP exports only its own local_info metrics; remote_info used only for node-map resolution
 
 ## OpenWrt environment
 

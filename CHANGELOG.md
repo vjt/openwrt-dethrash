@@ -1,5 +1,48 @@
 # Changelog
 
+## 0.3.0 — 2026-03-30
+
+### Added
+- **Hearing Map panel** — signal strength of selected station as seen by all APs,
+  showing usteer's roaming decision data.
+- **Channel Load panel** — channel utilization per AP radio from usteer.
+- **Roam Events panel** — source/target roam counts per AP from usteer.
+- **Clients per AP table** — connected client count with avg RSSI and SNR,
+  replacing the canvas topology panel.
+- **Signal Quality merged panel** — RSSI (solid), SNR (dashed), and noise floor
+  (dotted red) in a single panel (replaces separate RSSI and noise panels).
+- **Station dropdown** — dynamic variable populated from VictoriaLogs
+  `fields.station` via station-resolver enrichment. Works across both
+  Prometheus and VictoriaLogs panels.
+- **Collector: usteer runtime data** — hearing map signal, roam events, channel
+  load, and associated clients exported via ubus. Each AP exports only its own
+  `local_info` metrics; `remote_info` used only for node-map SSID resolution.
+- **Collector: nixio reverse DNS** — cached hostname resolution for remote AP
+  labels. Failures not cached, retried on next scrape.
+- `fetch_wifi_stations()` replaces `fetch_mac_names()` — only WiFi clients
+  included in MAC resolution.
+- `luci-lib-nixio` added as package dependency.
+
+### Fixed
+- **Collector: ubus leak on early return** — `u:close()` now always runs even
+  when `network.wireless status` fails. Replaced early returns with conditional
+  blocks.
+- **Collector: DNS cache cached failures permanently** — `resolve_ip()` no
+  longer caches raw IP on DNS failure, allowing retry on next scrape.
+- **Collector: remote_info metric duplication** — removed remote_info export of
+  roam events, load, and associated clients. Each AP exports only its own data.
+- **Dashboard: canvas panel in __requires** — removed stale canvas panel entry.
+- **Dashboard: panel IDs non-sequential** — renumbered 1-13 in order of
+  appearance.
+- **Dashboard: fragile station filter in file-export** — `_wrap_label_map()`
+  no longer injects `mac=~"$station"` in file-export format (no mac_names).
+
+### Changed
+- Dashboard reorganized: 13 panels (was 12), usteer visibility section added
+  between signal quality and events/clients.
+- Panel ID sequence: 1-13 in order of appearance.
+- PKG_VERSION bumped to 0.3.0.
+
 ## 0.2.0 — 2026-03-29
 
 ### Added

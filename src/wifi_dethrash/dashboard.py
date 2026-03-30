@@ -117,7 +117,7 @@ def _wrap_label_map(expr: str, mac_names: dict[str, str] | None) -> str:
     """
     if mac_names:
         return f'label_match(label_map({expr}, {_label_map_args(mac_names)}), "mac", "$station")'
-    return expr.replace("}", ', mac=~"$station"}', 1) if "}" in expr else expr
+    return expr
 
 
 _AP_COLORS = [
@@ -197,14 +197,15 @@ def _build_panels(
         },
         # === usteer visibility ===
         {
-            "id": 11, "title": "Hearing Map",
+            "id": 3, "title": "Hearing Map",
             "description": "Signal strength of the selected station as seen by all APs. Shows usteer's roaming decision data — when signals cross, a roam happens. Select a single station for best results.",
             "type": "timeseries",
             "gridPos": {"h": 10, "w": 24, "x": 0, "y": (y := y + 14)},
             "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
-            "targets": [{"refId": "A", "legendFormat": "{{ap}}", "expr":
+            "targets": [{"refId": "A", "legendFormat": "{{mac}} · {{ap}}", "expr":
                          _wrap_label_map(
-                             f'max by (mac, ap)(wifi_usteer_hearing_signal_dbm{{instance=~"{instance_re}"}})',
+                             f'max by (mac, ap)(wifi_usteer_hearing_signal_dbm{{instance=~"{instance_re}"}})'
+                             f' and on(mac) group by (mac)(wifi_station_signal_dbm{{instance=~"{instance_re}"}})',
                              mac_names)}],
             "fieldConfig": {"defaults": {"unit": "dBm", "custom": {"drawStyle": "line", "lineWidth": 2, "fillOpacity": 5}},
                 "overrides": []},
@@ -212,7 +213,7 @@ def _build_panels(
                         "legend": {"displayMode": "list", "placement": "bottom"}},
         },
         {
-            "id": 12, "title": "Channel Load",
+            "id": 4, "title": "Channel Load",
             "description": "Channel utilization per AP radio as reported by usteer. High load may trigger client steering.",
             "type": "timeseries",
             "gridPos": {"h": 8, "w": 12, "x": 0, "y": (y := y + 10)},
@@ -225,16 +226,16 @@ def _build_panels(
                         "legend": {"displayMode": "list", "placement": "bottom"}},
         },
         {
-            "id": 13, "title": "Roam Events (usteer)",
+            "id": 5, "title": "Roam Events (usteer)",
             "description": "Roams initiated by usteer per AP. Source = steered away, Target = steered to. Counters reset on service restart.",
             "type": "timeseries",
             "gridPos": {"h": 8, "w": 12, "x": 12, "y": y},
             "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
             "targets": [
                 {"refId": "A", "legendFormat": "{{ap}} source",
-                 "expr": f'max by (ap)(wifi_usteer_roam_events_source{{instance=~"{instance_re}"}})'  },
+                 "expr": f'increase(max by (ap)(wifi_usteer_roam_events_source{{instance=~"{instance_re}"}})[5m:])'  },
                 {"refId": "B", "legendFormat": "{{ap}} target",
-                 "expr": f'max by (ap)(wifi_usteer_roam_events_target{{instance=~"{instance_re}"}})'  },
+                 "expr": f'increase(max by (ap)(wifi_usteer_roam_events_target{{instance=~"{instance_re}"}})[5m:])'  },
             ],
             "fieldConfig": {"defaults": {"unit": "short", "custom": {
                 "drawStyle": "line", "lineWidth": 2, "fillOpacity": 10}}, "overrides": []},
@@ -243,7 +244,7 @@ def _build_panels(
         },
         # === MIDDLE: events + clients side by side ===
         {
-            "id": 3, "title": "Connect/Disconnect Events",
+            "id": 6, "title": "Connect/Disconnect Events",
             "description": "Hostapd connect/disconnect events with resolved station names.",
             "type": "logs",
             "gridPos": {"h": 12, "w": 12, "x": 0, "y": (y := y + 8)},
@@ -264,10 +265,10 @@ def _build_panels(
             ],
             "options": {},
         },
-        _build_clients_panel(instance_re, snr_expr, panel_id=4, y_offset=y, width=12, x_offset=12, height=12),
+        _build_clients_panel(instance_re, snr_expr, panel_id=7, y_offset=y, width=12, x_offset=12, height=12),
         # === ACTIVITY: time series ===
         {
-            "id": 5, "title": "Connects per Hour",
+            "id": 8, "title": "Connects per Hour",
             "description": "AP-STA-CONNECTED events stacked by AP. Spikes indicate thrashing or mass reconnections.",
             "type": "timeseries", "interval": "1m",
             "gridPos": {"h": 8, "w": 24, "x": 0, "y": (y := y + 12)},
@@ -282,7 +283,7 @@ def _build_panels(
                         "legend": {"displayMode": "list", "placement": "bottom"}},
         },
         {
-            "id": 6, "title": "FT vs Open Connects",
+            "id": 9, "title": "FT vs Open Connects",
             "description": "Fast transition (802.11r) roams vs plain open connections.",
             "type": "timeseries", "interval": "1m",
             "gridPos": {"h": 8, "w": 24, "x": 0, "y": (y := y + 8)},
@@ -303,7 +304,7 @@ def _build_panels(
             "options": {"tooltip": {"mode": "multi"}},
         },
         {
-            "id": 7, "title": "RSSI Heatmap",
+            "id": 10, "title": "RSSI Heatmap",
             "description": "Signal strength distribution over time in 5 dBm bands. Darker = more readings.",
             "type": "heatmap",
             "gridPos": {"h": 8, "w": 24, "x": 0, "y": (y := y + 8)},
@@ -316,7 +317,7 @@ def _build_panels(
         },
         # === BOTTOM: config reference (rarely changes) ===
         {
-            "id": 8, "title": "TX Power by Radio",
+            "id": 11, "title": "TX Power by Radio",
             "description": "Current transmit power per radio.",
             "type": "bargauge",
             "gridPos": {"h": 8, "w": 8, "x": 0, "y": (y := y + 8)},
@@ -331,7 +332,7 @@ def _build_panels(
                         "showUnfilled": True, "valueMode": "color", "textSizeMode": "auto"},
         },
         {
-            "id": 9, "title": "802.11r/k/v Status",
+            "id": 12, "title": "802.11r/k/v Status",
             "description": "Fast roaming protocol support per AP/SSID.",
             "type": "table",
             "gridPos": {"h": 8, "w": 8, "x": 8, "y": y},
@@ -356,7 +357,7 @@ def _build_panels(
             "options": {"sortBy": [{"displayName": "AP"}]},
         },
         {
-            "id": 10, "title": "usteer Config",
+            "id": 13, "title": "usteer Config",
             "description": "Current usteer roaming parameters across all APs.",
             "type": "table",
             "gridPos": {"h": 8, "w": 8, "x": 16, "y": y},
@@ -487,7 +488,6 @@ def generate_dashboard(
             {"type": "panel", "id": "stat", "name": "Stat", "version": ""},
             {"type": "panel", "id": "state-timeline", "name": "State timeline", "version": ""},
             {"type": "panel", "id": "heatmap", "name": "Heatmap", "version": ""},
-            {"type": "panel", "id": "canvas", "name": "Canvas", "version": ""},
         ],
         "id": None,
         "uid": None,

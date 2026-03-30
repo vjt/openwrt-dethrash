@@ -6,17 +6,17 @@ local ubus = require "ubus"
 local iwinfo = require "iwinfo"
 local nixio = require "nixio"
 
--- Module-level reverse DNS cache (resolved once, persists across scrapes)
+-- Module-level reverse DNS cache: successful lookups cached permanently,
+-- failures not cached so they're retried on next scrape.
 local _rdns_cache = {}
 local function resolve_ip(ip)
-  if _rdns_cache[ip] ~= nil then return _rdns_cache[ip] end
+  if _rdns_cache[ip] then return _rdns_cache[ip] end
   local ok, name = pcall(nixio.getnameinfo, ip)
   if ok and name then
     _rdns_cache[ip] = name:match("^([%w%-]+)") or ip  -- strip domain
-  else
-    _rdns_cache[ip] = ip
+    return _rdns_cache[ip]
   end
-  return _rdns_cache[ip]
+  return ip  -- DNS failed; don't cache, retry next scrape
 end
 
 local function scrape()
@@ -31,46 +31,48 @@ local function scrape()
 
   local status = u:call("network.wireless", "status", {})
 
-  if not status then return end
-
   -- Map device -> list of {ifname, ssid} for joining with UCI later
   local iface_by_device = {}
 
-  for dev, dev_table in pairs(status) do
-    iface_by_device[dev] = {}
-    for _, intf in ipairs(dev_table["interfaces"] or {}) do
-      local ifname = intf["ifname"]
-      if ifname then
-        local iw = iwinfo[iwinfo.type(ifname)]
-        if iw then
-          local ssid = iw.ssid(ifname) or ""
-          local labels = {device = dev, ifname = ifname, ssid = ssid}
+  if status then
+    for dev, dev_table in pairs(status) do
+      iface_by_device[dev] = {}
+      for _, intf in ipairs(dev_table["interfaces"] or {}) do
+        local ifname = intf["ifname"]
+        if ifname then
+          local iw = iwinfo[iwinfo.type(ifname)]
+          if iw then
+            local ssid = iw.ssid(ifname) or ""
+            local labels = {device = dev, ifname = ifname, ssid = ssid}
 
-          table.insert(iface_by_device[dev], {ifname = ifname, ssid = ssid})
+            table.insert(iface_by_device[dev], {ifname = ifname, ssid = ssid})
 
-          local txp = iw.txpower(ifname)
-          if txp then metric_txpower(labels, txp) end
+            local txp = iw.txpower(ifname)
+            if txp then metric_txpower(labels, txp) end
 
-          local txp_off = iw.txpower_offset(ifname)
-          if txp_off then metric_txpower_offset(labels, txp_off) end
+            local txp_off = iw.txpower_offset(ifname)
+            if txp_off then metric_txpower_offset(labels, txp_off) end
 
-          local ch = iw.channel(ifname)
-          if ch then metric_channel(labels, ch) end
+            local ch = iw.channel(ifname)
+            if ch then metric_channel(labels, ch) end
 
-          local freq = iw.frequency(ifname)
-          if freq then metric_frequency(labels, freq) end
+            local freq = iw.frequency(ifname)
+            if freq then metric_frequency(labels, freq) end
+          end
         end
       end
     end
   end
 
   -- Phase 2: UCI wireless config
-  local ok, ucic = pcall(function()
+  local ucic  -- shared with Phase 4
+  local ok_uci, cursor = pcall(function()
     local uci = require "uci"
     return uci.cursor()
   end)
+  if ok_uci and cursor then ucic = cursor end
 
-  if ok and ucic then
+  if ucic then
     local metric_configured_txpower = metric("wifi_radio_configured_txpower", "gauge")
     local metric_80211r = metric("wifi_iface_ieee80211r_enabled", "gauge")
     local metric_80211k = metric("wifi_iface_ieee80211k_enabled", "gauge")
@@ -124,6 +126,8 @@ local function scrape()
       end
     end
 
+    -- Remote info used only for node_map (SSID resolution in hearing map),
+    -- NOT for exporting metrics — each AP exports its own local_info.
     local remote_info = u:call("usteer", "remote_info", {})
     if remote_info then
       for node_key, info in pairs(remote_info) do
@@ -133,27 +137,22 @@ local function scrape()
       end
     end
 
-    -- Export roam events, load, clients from both local and remote
+    -- Export roam events, load, clients from LOCAL info only
     local metric_roam_source = metric("wifi_usteer_roam_events_source", "gauge")
     local metric_roam_target = metric("wifi_usteer_roam_events_target", "gauge")
     local metric_load = metric("wifi_usteer_load", "gauge")
     local metric_assoc = metric("wifi_usteer_associated_clients", "gauge")
 
-    local function export_node_info(node_key, info)
-      local nm = node_map[node_key] or {ap = node_key}
-      local labels = {ap = nm.ap}
-      local re = info.roam_events or {}
-      metric_roam_source(labels, re.source or 0)
-      metric_roam_target(labels, re.target or 0)
-      metric_load(labels, info.load or 0)
-      metric_assoc(labels, info.n_assoc or 0)
-    end
-
     if local_info then
-      for node_key, info in pairs(local_info) do export_node_info(node_key, info) end
-    end
-    if remote_info then
-      for node_key, info in pairs(remote_info) do export_node_info(node_key, info) end
+      for node_key, info in pairs(local_info) do
+        local nm = node_map[node_key] or {ap = node_key}
+        local labels = {ap = nm.ap}
+        local re = info.roam_events or {}
+        metric_roam_source(labels, re.source or 0)
+        metric_roam_target(labels, re.target or 0)
+        metric_load(labels, info.load or 0)
+        metric_assoc(labels, info.n_assoc or 0)
+      end
     end
 
     -- Hearing map: signal per MAC per AP (uses node_map for labels)
@@ -174,34 +173,36 @@ local function scrape()
   end)
 
   -- Phase 4: UCI usteer config
-  pcall(function()
-    local metric_min_connect_snr = metric("wifi_usteer_min_connect_snr", "gauge")
-    local metric_min_snr = metric("wifi_usteer_min_snr", "gauge")
-    local metric_roam_scan_snr = metric("wifi_usteer_roam_scan_snr", "gauge")
-    local metric_roam_trigger_snr = metric("wifi_usteer_roam_trigger_snr", "gauge")
-    local metric_signal_diff = metric("wifi_usteer_signal_diff_threshold", "gauge")
-    local metric_load_kick_enabled = metric("wifi_usteer_load_kick_enabled", "gauge")
-    local metric_load_kick_threshold = metric("wifi_usteer_load_kick_threshold", "gauge")
-    local metric_band_steer_snr = metric("wifi_usteer_band_steering_min_snr", "gauge")
+  if ucic then
+    pcall(function()
+      local metric_min_connect_snr = metric("wifi_usteer_min_connect_snr", "gauge")
+      local metric_min_snr = metric("wifi_usteer_min_snr", "gauge")
+      local metric_roam_scan_snr = metric("wifi_usteer_roam_scan_snr", "gauge")
+      local metric_roam_trigger_snr = metric("wifi_usteer_roam_trigger_snr", "gauge")
+      local metric_signal_diff = metric("wifi_usteer_signal_diff_threshold", "gauge")
+      local metric_load_kick_enabled = metric("wifi_usteer_load_kick_enabled", "gauge")
+      local metric_load_kick_threshold = metric("wifi_usteer_load_kick_threshold", "gauge")
+      local metric_band_steer_snr = metric("wifi_usteer_band_steering_min_snr", "gauge")
 
-    local opts = {
-      {metric_min_connect_snr, "min_connect_snr"},
-      {metric_min_snr, "min_snr"},
-      {metric_roam_scan_snr, "roam_scan_snr"},
-      {metric_roam_trigger_snr, "roam_trigger_snr"},
-      {metric_signal_diff, "signal_diff_threshold"},
-      {metric_load_kick_enabled, "load_kick_enabled"},
-      {metric_load_kick_threshold, "load_kick_threshold"},
-      {metric_band_steer_snr, "band_steering_min_snr"},
-    }
+      local opts = {
+        {metric_min_connect_snr, "min_connect_snr"},
+        {metric_min_snr, "min_snr"},
+        {metric_roam_scan_snr, "roam_scan_snr"},
+        {metric_roam_trigger_snr, "roam_trigger_snr"},
+        {metric_signal_diff, "signal_diff_threshold"},
+        {metric_load_kick_enabled, "load_kick_enabled"},
+        {metric_load_kick_threshold, "load_kick_threshold"},
+        {metric_band_steer_snr, "band_steering_min_snr"},
+      }
 
-    for _, pair in ipairs(opts) do
-      local val = tonumber(ucic:get("usteer", "@usteer[0]", pair[2]))
-      if val then
-        pair[1]({}, val)
+      for _, pair in ipairs(opts) do
+        local val = tonumber(ucic:get("usteer", "@usteer[0]", pair[2]))
+        if val then
+          pair[1]({}, val)
+        end
       end
-    end
-  end)
+    end)
+  end
 
   u:close()
 end

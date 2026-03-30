@@ -71,20 +71,22 @@ wifi-dethrash --generate-dashboard dashboard.json
 
 ### Grafana dashboard
 
-The dashboard includes 12 panels:
+The dashboard includes 13 panels with a dynamic station dropdown (populated
+from VictoriaLogs `fields.station` via station-resolver):
 
-1. **RSSI by Station** — per-MAC signal strength over time
-2. **Noise Floor** — per-radio noise floor
-3. **Connect/Disconnect Events** — hostapd event log
-4. **TX Power by Radio** — current and configured txpower
-5. **802.11r/k/v Status** — fast roaming config per AP
-6. **Usteer Thresholds** — usteer SNR/signal_diff settings
-7. **Thrashing Rate** — connects/hour per AP (bar chart)
-8. **Roaming Timeline** — which AP each MAC is on over time
-9. **RSSI Heatmap** — signal distribution over time
-10. **SNR Distribution** — SNR with good/marginal/weak bands
-11. **usteer Effectiveness** — ft vs open auth_alg ratio
-12. **AP Topology** — floor-by-floor AP map with client counts (requires `[aps]` config)
+1. **Roaming Timeline** — which AP each station is on over time (state-timeline)
+2. **Signal Quality** — RSSI (solid), SNR (dashed), noise (dotted red) merged panel
+3. **Hearing Map** — usteer signal per station as seen by all APs
+4. **Channel Load** — channel utilization per AP radio from usteer
+5. **Roam Events (usteer)** — source/target roam counts per AP
+6. **Connect/Disconnect Events** — hostapd event log with resolved station names
+7. **Clients per AP** — table with client count, avg RSSI, avg SNR
+8. **Connects per Hour** — connect events stacked by AP
+9. **FT vs Open Connects** — 802.11r fast transition vs plain auth ratio
+10. **RSSI Heatmap** — signal distribution over time in 5 dBm bands
+11. **TX Power by Radio** — current transmit power per radio
+12. **802.11r/k/v Status** — fast roaming protocol config per AP
+13. **usteer Config** — current usteer roaming parameters
 
 ## Data sources
 
@@ -96,11 +98,18 @@ The dashboard includes 12 panels:
 - `wifi_radio_configured_txpower` — UCI-configured txpower per radio (label: `device`)
 - `wifi_radio_channel` — current channel per radio
 - `wifi_radio_frequency_mhz` — current frequency per radio
+- `wifi_usteer_hearing_signal_dbm` — signal per MAC per AP from usteer hearing map
+- `wifi_usteer_hearing_connected` — whether MAC is connected to AP (0/1)
+- `wifi_usteer_roam_events_source` — roams initiated away from AP
+- `wifi_usteer_roam_events_target` — roams steered to AP
+- `wifi_usteer_load` — channel utilization per AP radio
+- `wifi_usteer_associated_clients` — connected client count per AP
 
 **VictoriaLogs** — hostapd syslog events shipped via Telegraf:
 
 - `AP-STA-CONNECTED <mac> auth_alg=ft|open` — connect events
 - `AP-STA-DISCONNECTED <mac>` — disconnect events
+- `fields.station` — resolved hostname enriched by station-resolver
 
 ## Collector deployment
 
@@ -108,7 +117,8 @@ The `openwrt/` directory contains an OpenWrt package (`wifi-dethrash-collector`)
 that installs a custom `prometheus-node-exporter-lua` collector on each AP.
 
 It exports radio metrics (txpower, channel, frequency), 802.11r/k/v config,
-and usteer thresholds.
+usteer thresholds, and usteer runtime data (hearing map, roam events,
+channel load, associated clients). Uses nixio for cached reverse DNS.
 
 ### Package build
 
@@ -138,6 +148,6 @@ opkg install wifi-dethrash-collector
 
 ```bash
 pip install -e ".[dev]"
-pytest -v              # 93 tests
+pytest -v              # 99 tests
 pyright src/ tests/    # zero errors
 ```

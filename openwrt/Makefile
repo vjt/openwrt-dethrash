@@ -4,7 +4,7 @@
 include $(TOPDIR)/rules.mk
 
 PKG_NAME:=wifi-dethrash-collector
-PKG_VERSION:=0.2.0
+PKG_VERSION:=0.3.0
 PKG_RELEASE:=1
 
 include $(INCLUDE_DIR)/package.mk
@@ -13,13 +13,14 @@ define Package/wifi-dethrash-collector
   SECTION:=utils
   CATEGORY:=Utilities
   TITLE:=WiFi Dethrash Prometheus Collector
-  DEPENDS:=+prometheus-node-exporter-lua +libuci-lua
+  DEPENDS:=+prometheus-node-exporter-lua +libuci-lua +luci-lib-nixio
   PKGARCH:=all
 endef
 
 define Package/wifi-dethrash-collector/description
   Custom prometheus-node-exporter-lua collector that exports WiFi radio
-  txpower, channel, 802.11r/k/v config, and usteer thresholds.
+  txpower, channel, 802.11r/k/v config, usteer thresholds, and usteer
+  runtime data (hearing map, roam events, channel load).
 endef
 
 define Build/Compile
