@@ -2,81 +2,93 @@ import json
 from wifi_dethrash.sources.vm import APInfo
 
 
-def _parse_location(s: str) -> tuple[str, str]:
-    """Split 'Ground floor / Living room' into ('Ground floor', 'Living room')."""
-    if "/" in s:
-        floor, room = s.split("/", 1)
-        return floor.strip(), room.strip()
-    return s.strip(), ""
-
-
-def _build_topology_panel(
-    ap_locations: dict[str, str],
+def _build_clients_panel(
+    instance_re: str,
+    snr_expr: str,
     panel_id: int,
     y_offset: int,
 ) -> dict[str, object]:
-    """Build a canvas panel showing AP topology grouped by floor."""
-    floors: dict[str, list[tuple[str, str]]] = {}
-    for ap, location in sorted(ap_locations.items()):
-        floor, room = _parse_location(location)
-        floors.setdefault(floor, []).append((ap, room))
-
-    elements: list[dict[str, object]] = []
-    y = 50
-    for floor_name, floor_aps in sorted(floors.items()):
-        # Floor label
-        elements.append({
-            "type": "rectangle",
-            "name": f"floor-{floor_name}",
-            "config": {
-                "backgroundColor": {"fixed": "transparent"},
-                "borderColor": {"fixed": "gray"},
-                "text": {"fixed": floor_name},
-            },
-            "placement": {"left": 10, "top": y, "width": 780, "height": 30},
-            "background": {"color": {"fixed": "transparent"}},
-        })
-        y += 40
-
-        x = 30
-        for ap, room in floor_aps:
-            label = f"{ap}\n{room}" if room else ap
-            elements.append({
-                "type": "metric-value",
-                "name": f"ap-{ap}",
-                "config": {
-                    "text": {"fixed": label},
-                    "backgroundColor": {"fixed": "semi-dark-blue"},
-                    "borderColor": {"fixed": "dark-blue"},
-                    "color": {"fixed": "white"},
-                },
-                "placement": {"left": x, "top": y, "width": 140, "height": 60},
-                "field": {
-                    "source": "A",
-                    "filter": [f'instance=~"{ap}:.*"'],
-                },
-            })
-            x += 170
-        y += 80
-
+    """Build a table showing connected clients, avg RSSI, and avg SNR per AP."""
     return {
         "id": panel_id,
-        "title": "AP Topology",
-        "type": "canvas",
-        "gridPos": {"h": 10, "w": 24, "x": 0, "y": y_offset},
+        "title": "Clients per AP",
+        "description": "Live client count and average signal quality per AP. RSSI and SNR cells colored by quality thresholds.",
+        "type": "table",
+        "gridPos": {"h": 8, "w": 24, "x": 0, "y": y_offset},
         "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
         "targets": [
             {
                 "refId": "A",
-                "expr": "count(wifi_station_signal_dbm) by (instance)",
+                "expr": f'count by (instance)(wifi_station_signal_dbm{{instance=~"{instance_re}"}})',
                 "instant": True,
-                "legendFormat": "{{instance}}",
-            }
-        ],
-        "options": {
-            "root": {
-                "elements": elements,
+                "format": "table",
             },
+            {
+                "refId": "B",
+                "expr": f'round(avg by (instance)(wifi_station_signal_dbm{{instance=~"{instance_re}"}}), 0.1)',
+                "instant": True,
+                "format": "table",
+            },
+            {
+                "refId": "C",
+                "expr": f'round(avg by (instance)({snr_expr}), 0.1)',
+                "instant": True,
+                "format": "table",
+            },
+        ],
+        "transformations": [
+            {"id": "merge"},
+            {"id": "organize", "options": {
+                "excludeByName": {"Time": True},
+                "renameByName": {
+                    "instance": "AP",
+                    "Value #A": "Clients",
+                    "Value #B": "Avg RSSI",
+                    "Value #C": "Avg SNR",
+                },
+                "indexByName": {
+                    "instance": 0,
+                    "Value #A": 1,
+                    "Value #B": 2,
+                    "Value #C": 3,
+                },
+            }},
+        ],
+        "fieldConfig": {
+            "defaults": {},
+            "overrides": [
+                {"matcher": {"id": "byName", "options": "Avg RSSI"}, "properties": [
+                    {"id": "unit", "value": "dBm"},
+                    {"id": "custom.cellOptions", "value": {
+                        "type": "color-background", "mode": "basic",
+                    }},
+                    {"id": "thresholds", "value": {
+                        "mode": "absolute",
+                        "steps": [
+                            {"color": "red", "value": None},
+                            {"color": "yellow", "value": -75},
+                            {"color": "green", "value": -65},
+                        ],
+                    }},
+                ]},
+                {"matcher": {"id": "byName", "options": "Avg SNR"}, "properties": [
+                    {"id": "unit", "value": "dB"},
+                    {"id": "custom.cellOptions", "value": {
+                        "type": "color-background", "mode": "basic",
+                    }},
+                    {"id": "thresholds", "value": {
+                        "mode": "absolute",
+                        "steps": [
+                            {"color": "red", "value": None},
+                            {"color": "yellow", "value": 15},
+                            {"color": "green", "value": 25},
+                        ],
+                    }},
+                ]},
+            ],
+        },
+        "options": {
+            "sortBy": [{"displayName": "Clients", "desc": True}],
         },
     }
 
@@ -97,17 +109,23 @@ def _label_map_args(mac_names: dict[str, str]) -> str:
 def _wrap_label_map(expr: str, mac_names: dict[str, str] | None) -> str:
     """Wrap a PromQL expression with label_map() and station filter.
 
-    Uses $station_re (hidden variable with allValue=".*") for Prometheus
-    regex matching, while VL panels use $station (allValue="*").
+    Uses $station variable (allValue=".*") for regex matching in both
+    Prometheus (label_match) and VL (fields.station:~"$station") panels.
     """
     if mac_names:
-        return f'label_match(label_map({expr}, {_label_map_args(mac_names)}), "mac", "$station_re")'
-    return expr.replace("}", ', mac=~"$station_re"}', 1) if "}" in expr else expr
+        return f'label_match(label_map({expr}, {_label_map_args(mac_names)}), "mac", "$station")'
+    return expr.replace("}", ', mac=~"$station"}', 1) if "}" in expr else expr
+
+
+_AP_COLORS = [
+    "semi-dark-green", "semi-dark-blue", "semi-dark-orange",
+    "semi-dark-purple", "semi-dark-yellow", "semi-dark-red",
+    "dark-green", "dark-blue",
+]
 
 
 def _build_panels(
     aps: list[APInfo],
-    ap_locations: dict[str, str] | None = None,
     mac_names: dict[str, str] | None = None,
 ) -> list[dict[str, object]]:
     """Build panel list with datasource placeholders."""
@@ -116,76 +134,104 @@ def _build_panels(
     rssi_expr = f'wifi_station_signal_dbm{{instance=~"{instance_re}"}}'
     snr_expr = (
         f'wifi_station_signal_dbm{{instance=~"{instance_re}"}}'
-        f' - on(instance, device) group_left()'
+        f' - on(instance, ifname) group_left()'
         f' wifi_network_noise_dbm'
     )
+
+    # Roaming timeline: each AP gets a numeric ID, state-timeline uses
+    # value mappings to display AP names as colored blocks.
+    roaming_parts = [
+        f'(group by (mac)(wifi_station_signal_dbm{{instance="{ap.instance}"}}) * 0 + {i})'
+        for i, ap in enumerate(aps, 1)
+    ]
+    roaming_expr = " or ".join(roaming_parts)
+    roaming_expr = _wrap_label_map(roaming_expr, mac_names)
+    roaming_mappings: list[dict[str, object]] = [
+        {"type": "value", "options": {
+            str(i): {"text": ap.hostname, "color": _AP_COLORS[(i - 1) % len(_AP_COLORS)]}
+            for i, ap in enumerate(aps, 1)
+        }},
+    ]
 
     panels: list[dict[str, object]] = [
         {
             "id": 1,
-            "title": "RSSI by Station",
+            "title": "Signal Quality",
+            "description": "RSSI (solid), SNR (dashed), and noise floor (dotted red) per station. Noise only shows for APs the selected station is connected to.",
             "type": "timeseries",
-            "gridPos": {"h": 8, "w": 24, "x": 0, "y": 0},
+            "gridPos": {"h": 10, "w": 24, "x": 0, "y": 0},
             "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
             "targets": [
                 {
                     "refId": "A",
                     "expr": _wrap_label_map(rssi_expr, mac_names),
-                    "legendFormat": "{{instance}} / {{mac}}",
-                }
-            ],
-            "fieldConfig": {
-                "defaults": {
-                    "unit": "dBm",
-                    "custom": {"drawStyle": "line", "lineWidth": 1},
+                    "legendFormat": "RSSI {{instance}} / {{mac}}",
                 },
-                "overrides": [],
-            },
-            "options": {},
-        },
-        {
-            "id": 2,
-            "title": "Noise Floor",
-            "type": "timeseries",
-            "gridPos": {"h": 8, "w": 24, "x": 0, "y": 8},
-            "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
-            "targets": [
                 {
-                    "refId": "A",
-                    "expr": f'wifi_network_noise_dbm{{instance=~"{instance_re}"}}',
-                    "legendFormat": "{{instance}} / {{device}} ({{frequency}} MHz)",
-                }
+                    "refId": "B",
+                    "expr": _wrap_label_map(snr_expr, mac_names),
+                    "legendFormat": "SNR {{instance}} / {{mac}}",
+                },
+                {
+                    "refId": "C",
+                    "expr": (
+                        f'wifi_network_noise_dbm{{instance=~"{instance_re}"}}'
+                        f' and on(instance, ifname)'
+                        f' (group by (instance, ifname)({_wrap_label_map(rssi_expr, mac_names)}))'
+                    ),
+                    "legendFormat": "Noise {{instance}} / {{ifname}}",
+                },
             ],
             "fieldConfig": {
                 "defaults": {
                     "unit": "dBm",
                     "custom": {"drawStyle": "line", "lineWidth": 1},
                 },
-                "overrides": [],
+                "overrides": [
+                    {"matcher": {"id": "byFrameRefID", "options": "B"}, "properties": [
+                        {"id": "custom.lineStyle", "value": {"fill": "dash", "dash": [10, 5]}},
+                    ]},
+                    {"matcher": {"id": "byFrameRefID", "options": "C"}, "properties": [
+                        {"id": "custom.lineWidth", "value": 2},
+                        {"id": "custom.lineStyle", "value": {"fill": "dot"}},
+                        {"id": "color", "value": {"mode": "fixed", "fixedColor": "dark-red"}},
+                    ]},
+                ],
             },
-            "options": {},
+            "options": {"tooltip": {"mode": "multi"}},
         },
         {
             "id": 3,
             "title": "Connect/Disconnect Events",
+            "description": "Hostapd AP-STA-CONNECTED/DISCONNECTED events with resolved station names. Green = connect, red = disconnect.",
             "type": "logs",
-            "gridPos": {"h": 8, "w": 24, "x": 0, "y": 16},
+            "gridPos": {"h": 8, "w": 24, "x": 0, "y": 10},
             "datasource": {"type": "victoriametrics-logs-datasource", "uid": "${DS_VICTORIALOGS}"},
             "targets": [
                 {
                     "refId": "A",
                     "expr": (
-                        'tags.appname:hostapd AND _msg:AP-STA-CONNECTED AND fields.station:$station'
+                        'tags.appname:hostapd AND _msg:AP-STA-CONNECTED AND _msg:auth_alg'
+                        ' AND fields.station:~"$station"'
                         ' | extract "AP-STA-CONNECTED <mac> auth_alg=<auth>" from _msg'
-                        ' | format "🟢 <_time> <fields.station> (<mac>) ▸ <tags.hostname> (<auth>)" as _msg'
+                        ' | format "🟢 <_time> <fields.station> ▸ <tags.hostname> (<auth>) · <mac>" as _msg'
                     ),
                 },
                 {
                     "refId": "B",
                     "expr": (
-                        'tags.appname:hostapd AND _msg:AP-STA-DISCONNECTED AND fields.station:$station'
+                        'tags.appname:hostapd AND _msg:AP-STA-CONNECTED AND NOT _msg:auth_alg'
+                        ' AND fields.station:~"$station"'
+                        ' | extract "AP-STA-CONNECTED <mac>" from _msg'
+                        ' | format "🟢 <_time> <fields.station> ▸ <tags.hostname> (open) · <mac>" as _msg'
+                    ),
+                },
+                {
+                    "refId": "C",
+                    "expr": (
+                        'tags.appname:hostapd AND _msg:AP-STA-DISCONNECTED AND fields.station:~"$station"'
                         ' | extract "AP-STA-DISCONNECTED <mac>" from _msg'
-                        ' | format "🔴 <_time> <fields.station> (<mac>) ◂ <tags.hostname>" as _msg'
+                        ' | format "🔴 <_time> <fields.station> ◂ <tags.hostname> · <mac>" as _msg'
                     ),
                 },
             ],
@@ -194,8 +240,9 @@ def _build_panels(
         {
             "id": 4,
             "title": "TX Power by Radio",
+            "description": "Current transmit power per radio. Higher = more coverage but more overlap between APs.",
             "type": "bargauge",
-            "gridPos": {"h": 8, "w": 12, "x": 0, "y": 24},
+            "gridPos": {"h": 8, "w": 12, "x": 0, "y": 18},
             "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
             "targets": [
                 {
@@ -232,8 +279,9 @@ def _build_panels(
         {
             "id": 5,
             "title": "802.11r/k/v Status",
-            "type": "stat",
-            "gridPos": {"h": 4, "w": 12, "x": 12, "y": 24},
+            "description": "Fast roaming support per AP. 3/3 = all protocols enabled (r=fast transition, k=neighbor reports, v=BSS transition).",
+            "type": "table",
+            "gridPos": {"h": 8, "w": 12, "x": 12, "y": 18},
             "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
             "targets": [
                 {
@@ -243,41 +291,60 @@ def _build_panels(
                         f' + on(instance, device, ifname, ssid) wifi_iface_ieee80211k_enabled'
                         f' + on(instance, device, ifname, ssid) wifi_iface_ieee80211v_enabled'
                     ),
-                    "legendFormat": "{{instance}} / {{ssid}}",
+                    "instant": True,
+                    "format": "table",
                 },
             ],
-            "fieldConfig": {
-                "defaults": {
-                    "mappings": [
-                        {"type": "value", "options": {
-                            "0": {"text": "❌ disabled", "color": "red"},
-                            "1": {"text": "⚠️ 1/3", "color": "yellow"},
-                            "2": {"text": "⚠️ 2/3", "color": "yellow"},
-                            "3": {"text": "✅ r/k/v", "color": "green"},
-                        }},
-                    ],
-                    "thresholds": {
-                        "mode": "absolute",
-                        "steps": [
-                            {"color": "red", "value": None},
-                            {"color": "yellow", "value": 1},
-                            {"color": "green", "value": 3},
-                        ],
+            "transformations": [
+                {"id": "organize", "options": {
+                    "excludeByName": {
+                        "Time": True, "__name__": True, "device": True,
+                        "ifname": True, "metric_format": True, "metric_source": True,
                     },
-                },
-                "overrides": [],
+                    "renameByName": {
+                        "instance": "AP",
+                        "ssid": "SSID",
+                        "Value": "Score",
+                    },
+                    "indexByName": {"instance": 0, "ssid": 1, "Value": 2},
+                }},
+            ],
+            "fieldConfig": {
+                "defaults": {},
+                "overrides": [
+                    {"matcher": {"id": "byName", "options": "Score"}, "properties": [
+                        {"id": "mappings", "value": [
+                            {"type": "value", "options": {
+                                "0": {"text": "❌ 0/3", "color": "red"},
+                                "1": {"text": "⚠️ 1/3", "color": "yellow"},
+                                "2": {"text": "⚠️ 2/3", "color": "yellow"},
+                                "3": {"text": "✅ 3/3", "color": "green"},
+                            }},
+                        ]},
+                        {"id": "custom.cellOptions", "value": {
+                            "type": "color-background", "mode": "basic",
+                        }},
+                        {"id": "thresholds", "value": {
+                            "mode": "absolute",
+                            "steps": [
+                                {"color": "red", "value": None},
+                                {"color": "yellow", "value": 1},
+                                {"color": "green", "value": 3},
+                            ],
+                        }},
+                    ]},
+                ],
             },
             "options": {
-                "textMode": "value_and_name",
-                "colorMode": "background",
-                "reduceOptions": {"calcs": ["lastNotNull"]},
+                "sortBy": [{"displayName": "AP"}],
             },
         },
         {
             "id": 6,
             "title": "usteer Config",
+            "description": "Key usteer roaming parameters. signal_diff = min dB improvement to trigger roam, roam_scan_snr = min SNR to start scanning.",
             "type": "stat",
-            "gridPos": {"h": 4, "w": 24, "x": 0, "y": 30},
+            "gridPos": {"h": 4, "w": 24, "x": 0, "y": 24},
             "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
             "targets": [
                 {
@@ -313,80 +380,77 @@ def _build_panels(
         {
             "id": 7,
             "title": "Connects per Hour",
-            "type": "barchart",
-            "gridPos": {"h": 8, "w": 24, "x": 0, "y": 34},
+            "description": "AP-STA-CONNECTED events per hour, stacked by AP. Spikes indicate thrashing or mass reconnections.",
+            "type": "timeseries",
+            "interval": "1m",
+            "gridPos": {"h": 8, "w": 24, "x": 0, "y": 28},
             "datasource": {"type": "victoriametrics-logs-datasource", "uid": "${DS_VICTORIALOGS}"},
             "targets": [
                 {
                     "refId": "A",
+                    "queryType": "statsRange",
+                    "legendFormat": "{{tags.hostname}}",
                     "expr": (
                         'tags.appname:hostapd AND _msg:AP-STA-CONNECTED'
-                        ' | stats by (_time:1h, tags.hostname) count() connects'
+                        ' AND fields.station:~"$station"'
+                        ' | stats by (tags.hostname) count() connects'
                     ),
                 }
             ],
             "fieldConfig": {
                 "defaults": {
                     "unit": "short",
+                    "custom": {
+                        "drawStyle": "line",
+                        "lineWidth": 2,
+                        "fillOpacity": 20,
+                        "stacking": {"mode": "normal"},
+                        "showPoints": "never",
+                    },
+                    "noValue": "0",
                 },
                 "overrides": [],
             },
             "options": {
-                "stacking": "normal",
-                "tooltip": {"mode": "multi"},
+                "tooltip": {"mode": "multi", "sort": "desc"},
+                "legend": {"displayMode": "list", "placement": "bottom"},
             },
-            "transformations": [
-                {"id": "convertFieldType", "options": {
-                    "conversions": [{"targetField": "connects", "destinationType": "number"}],
-                }},
-            ],
         },
         {
             "id": 8,
-            "title": "Roaming Events",
-            "type": "table",
-            "gridPos": {"h": 10, "w": 24, "x": 0, "y": 42},
-            "datasource": {"type": "victoriametrics-logs-datasource", "uid": "${DS_VICTORIALOGS}"},
+            "title": "Roaming Timeline",
+            "description": "Which AP each station is connected to over time. Color changes = roaming events. Derived from RSSI metric presence.",
+            "type": "state-timeline",
+            "gridPos": {"h": 10, "w": 24, "x": 0, "y": 36},
+            "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
             "targets": [
                 {
                     "refId": "A",
-                    "expr": (
-                        'tags.appname:hostapd AND _msg:AP-STA-CONNECTED'
-                        ' | extract_regexp "CONNECTED (?P<mac>[0-9a-fA-F:]{17})" from _msg'
-                        ' | extract "auth_alg=<auth>" from _msg'
-                        ' | fields _time, fields.station, mac, tags.hostname, auth'
-                    ),
+                    "expr": roaming_expr,
+                    "legendFormat": "{{mac}}",
                 }
             ],
             "fieldConfig": {
-                "defaults": {},
-                "overrides": [
-                    {"matcher": {"id": "byName", "options": "_time"}, "properties": [
-                        {"id": "displayName", "value": "Time"},
-                    ]},
-                    {"matcher": {"id": "byName", "options": "fields.station"}, "properties": [
-                        {"id": "displayName", "value": "Station"},
-                    ]},
-                    {"matcher": {"id": "byName", "options": "mac"}, "properties": [
-                        {"id": "displayName", "value": "MAC"},
-                    ]},
-                    {"matcher": {"id": "byName", "options": "tags.hostname"}, "properties": [
-                        {"id": "displayName", "value": "AP"},
-                    ]},
-                    {"matcher": {"id": "byName", "options": "auth"}, "properties": [
-                        {"id": "displayName", "value": "Auth"},
-                    ]},
-                ],
+                "defaults": {
+                    "mappings": roaming_mappings,
+                    "custom": {"fillOpacity": 80},
+                },
+                "overrides": [],
             },
             "options": {
-                "sortBy": [{"displayName": "Time", "desc": True}],
+                "showValue": "auto",
+                "mergeValues": True,
+                "alignValue": "left",
+                "legend": {"displayMode": "list", "placement": "bottom"},
+                "tooltip": {"mode": "single"},
             },
         },
         {
             "id": 9,
             "title": "RSSI Heatmap",
+            "description": "Signal strength distribution over time in 5 dBm bands. Darker = more readings in that band. Tight cluster = stable, spread = varying signal.",
             "type": "heatmap",
-            "gridPos": {"h": 8, "w": 24, "x": 0, "y": 50},
+            "gridPos": {"h": 8, "w": 24, "x": 0, "y": 46},
             "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
             "targets": [
                 {
@@ -402,58 +466,34 @@ def _build_panels(
             "options": {
                 "calculate": True,
                 "calculation": {"xBuckets": {"mode": "size"}, "yBuckets": {"mode": "size", "value": "5"}},
-                "color": {"mode": "scheme", "scheme": "RdYlGn", "reverse": True},
+                "color": {"mode": "scheme", "scheme": "Blues"},
                 "yAxis": {"unit": "dBm"},
             },
         },
         {
-            "id": 10,
-            "title": "SNR Distribution",
-            "type": "timeseries",
-            "gridPos": {"h": 8, "w": 24, "x": 0, "y": 58},
-            "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
-            "targets": [
-                {
-                    "refId": "A",
-                    "expr": _wrap_label_map(snr_expr, mac_names),
-                    "legendFormat": "{{instance}} / {{mac}}",
-                }
-            ],
-            "fieldConfig": {
-                "defaults": {
-                    "unit": "dB",
-                    "custom": {"drawStyle": "line", "lineWidth": 1, "fillOpacity": 10},
-                    "thresholds": {
-                        "mode": "absolute",
-                        "steps": [
-                            {"color": "red", "value": None},
-                            {"color": "yellow", "value": 15},
-                            {"color": "green", "value": 25},
-                        ],
-                    },
-                },
-                "overrides": [],
-            },
-            "options": {"tooltip": {"mode": "multi"}},
-        },
-        {
             "id": 11,
-            "title": "usteer Effectiveness",
+            "title": "FT vs Open Connects",
+            "description": "Fast transition (802.11r) roams vs plain open connections. High FT ratio = clients are roaming seamlessly between APs.",
             "type": "timeseries",
-            "gridPos": {"h": 8, "w": 24, "x": 0, "y": 66},
+            "interval": "1m",
+            "gridPos": {"h": 8, "w": 24, "x": 0, "y": 54},
             "datasource": {"type": "victoriametrics-logs-datasource", "uid": "${DS_VICTORIALOGS}"},
             "targets": [
                 {
                     "refId": "A",
+                    "queryType": "statsRange",
+                    "legendFormat": "ft roams",
                     "expr": (
-                        'tags.appname:hostapd AND _msg:AP-STA-CONNECTED AND _msg:auth_alg=ft'
+                        'tags.appname:hostapd AND _msg:AP-STA-CONNECTED AND _msg:"auth_alg=ft"'
                         ' | stats count() ft_roams'
                     ),
                 },
                 {
                     "refId": "B",
+                    "queryType": "statsRange",
+                    "legendFormat": "open connects",
                     "expr": (
-                        'tags.appname:hostapd AND _msg:AP-STA-CONNECTED AND _msg:auth_alg=open'
+                        'tags.appname:hostapd AND _msg:AP-STA-CONNECTED AND _msg:"auth_alg=open"'
                         ' | stats count() open_connects'
                     ),
                 },
@@ -461,7 +501,8 @@ def _build_panels(
             "fieldConfig": {
                 "defaults": {
                     "unit": "short",
-                    "custom": {"drawStyle": "line", "lineWidth": 2, "fillOpacity": 20},
+                    "custom": {"drawStyle": "line", "lineWidth": 2, "fillOpacity": 20, "showPoints": "never"},
+                    "noValue": "0",
                 },
                 "overrides": [
                     {
@@ -478,49 +519,49 @@ def _build_panels(
         },
     ]
 
-    if ap_locations:
-        last_y = max(p["gridPos"]["y"] + p["gridPos"]["h"]  # type: ignore[operator]
-                     for p in panels)
-        panels.append(_build_topology_panel(
-            ap_locations, panel_id=len(panels) + 1, y_offset=last_y))
+    last_y = max(p["gridPos"]["y"] + p["gridPos"]["h"]  # type: ignore[operator]
+                 for p in panels)
+    panels.append(_build_clients_panel(
+        instance_re, snr_expr, panel_id=len(panels) + 1, y_offset=last_y))
 
     return panels
 
 
-def _station_variables(mac_names: dict[str, str] | None) -> list[dict[str, object]]:
-    """Build station selector variables.
+def _station_variables() -> list[dict[str, object]]:
+    """Build station selector variable.
 
-    station: visible dropdown, allValue="*" for VL (LogsQL field:* = exists)
-    station_re: hidden, same list, allValue=".*" for Prometheus regex
-    User selects from one dropdown, both update to the same value.
+    Dynamic query variable using VL field_values endpoint.
+    Single variable with allValue=".*" works for both datasources:
+    - Prometheus: label_match(..., "mac", "$station") — regex match
+    - VictoriaLogs: fields.station:~"$station" — LogsQL regex filter
     """
-    names = sorted(set(mac_names.values()), key=str.lower) if mac_names else []
-    query = ",".join(names)
     return [
         {
             "name": "station",
             "label": "Station",
-            "type": "custom",
-            "query": query,
-            "includeAll": True,
-            "allValue": "*",
-            "multi": False,
-        },
-        {
-            "name": "station_re",
-            "type": "custom",
-            "query": query,
+            "type": "query",
+            "datasource": {
+                "type": "victoriametrics-logs-datasource",
+                "uid": "${DS_VICTORIALOGS}",
+            },
+            "query": {
+                "type": "fieldValue",
+                "field": "fields.station",
+                "query": "tags.appname:hostapd AND _msg:AP-STA-CONNECTED AND fields.station:*",
+                "limit": 500,
+            },
             "includeAll": True,
             "allValue": ".*",
             "multi": False,
-            "hide": 2,
+            "refresh": 1,
+            "sort": 1,
         },
     ]
 
 
-def _dashboard_shell(panels: list[dict[str, object]], mac_names: dict[str, str] | None = None) -> dict[str, object]:
+def _dashboard_shell(panels: list[dict[str, object]]) -> dict[str, object]:
     """Common dashboard structure shared by both formats."""
-    variables = _station_variables(mac_names)
+    variables = _station_variables()
 
     return {
         "title": "WiFi Mesh Health",
@@ -539,13 +580,12 @@ def _dashboard_shell(panels: list[dict[str, object]], mac_names: dict[str, str] 
 
 def generate_dashboard(
     aps: list[APInfo],
-    ap_locations: dict[str, str] | None = None,
 ) -> str:
     """Generate Grafana dashboard JSON in file-import format.
 
     Output includes __inputs so the UI prompts for datasource selection.
     """
-    panels = _build_panels(aps, ap_locations=ap_locations, mac_names=None)
+    panels = _build_panels(aps, mac_names=None)
     dashboard: dict[str, object] = {
         "__inputs": [
             {
@@ -587,17 +627,16 @@ def generate_dashboard_api(
     aps: list[APInfo],
     prometheus_uid: str,
     victorialogs_uid: str,
-    ap_locations: dict[str, str] | None = None,
     mac_names: dict[str, str] | None = None,
 ) -> dict[str, object]:
     """Generate Grafana dashboard dict for API push.
 
     Substitutes real datasource UIDs (no __inputs/__requires).
     """
-    panels = _build_panels(aps, ap_locations=ap_locations, mac_names=mac_names)
+    panels = _build_panels(aps, mac_names=mac_names)
     dashboard = {
         "uid": "wifi-dethrash",
-        **_dashboard_shell(panels, mac_names=mac_names),
+        **_dashboard_shell(panels),
     }
 
     # Replace datasource placeholders with real UIDs

@@ -26,19 +26,12 @@ class TestDashboard:
         assert "DS_VICTORIALOGS" in inputs
         assert inputs["DS_PROMETHEUS"]["pluginId"] == "prometheus"
 
-    def test_has_rssi_panel(self):
+    def test_has_signal_quality_panel(self):
         aps = [APInfo(hostname="mowgli", instance="mowgli:9100")]
         parsed = json.loads(generate_dashboard(aps))
 
         titles = [p["title"] for p in parsed["panels"]]
-        assert "RSSI by Station" in titles
-
-    def test_has_noise_panel(self):
-        aps = [APInfo(hostname="mowgli", instance="mowgli:9100")]
-        parsed = json.loads(generate_dashboard(aps))
-
-        titles = [p["title"] for p in parsed["panels"]]
-        assert "Noise Floor" in titles
+        assert "Signal Quality" in titles
 
     def test_has_events_panel(self):
         aps = [APInfo(hostname="mowgli", instance="mowgli:9100")]
@@ -105,7 +98,7 @@ class TestDashboard:
         aps = [APInfo(hostname="mowgli", instance="mowgli:9100")]
         parsed = json.loads(generate_dashboard(aps))
         titles = [p["title"] for p in parsed["panels"]]
-        assert "Roaming Events" in titles
+        assert "Roaming Timeline" in titles
 
     def test_has_rssi_heatmap_panel(self):
         aps = [APInfo(hostname="mowgli", instance="mowgli:9100")]
@@ -113,59 +106,22 @@ class TestDashboard:
         titles = [p["title"] for p in parsed["panels"]]
         assert "RSSI Heatmap" in titles
 
-    def test_has_snr_distribution_panel(self):
-        aps = [APInfo(hostname="mowgli", instance="mowgli:9100")]
-        parsed = json.loads(generate_dashboard(aps))
-        titles = [p["title"] for p in parsed["panels"]]
-        assert "SNR Distribution" in titles
-
     def test_has_usteer_effectiveness_panel(self):
         aps = [APInfo(hostname="mowgli", instance="mowgli:9100")]
         parsed = json.loads(generate_dashboard(aps))
         titles = [p["title"] for p in parsed["panels"]]
-        assert "usteer Effectiveness" in titles
+        assert "FT vs Open Connects" in titles
 
-    def test_panel_count_without_locations(self):
+    def test_panel_count(self):
         aps = [APInfo(hostname="mowgli", instance="mowgli:9100")]
         parsed = json.loads(generate_dashboard(aps))
-        assert len(parsed["panels"]) == 11
+        assert len(parsed["panels"]) == 10
 
-    def test_panel_count_with_locations(self):
-        aps = [APInfo(hostname="mowgli", instance="mowgli:9100")]
-        locations = {"mowgli": "-1 / Garden"}
-        parsed = json.loads(generate_dashboard(aps, ap_locations=locations))
-        assert len(parsed["panels"]) == 12
-
-    def test_topology_panel_present_with_locations(self):
-        aps = [APInfo(hostname="mowgli", instance="mowgli:9100")]
-        locations = {"mowgli": "-1 / Garden"}
-        parsed = json.loads(generate_dashboard(aps, ap_locations=locations))
-        titles = [p["title"] for p in parsed["panels"]]
-        assert "AP Topology" in titles
-
-    def test_topology_panel_absent_without_locations(self):
+    def test_has_clients_per_ap_panel(self):
         aps = [APInfo(hostname="mowgli", instance="mowgli:9100")]
         parsed = json.loads(generate_dashboard(aps))
         titles = [p["title"] for p in parsed["panels"]]
-        assert "AP Topology" not in titles
-
-    def test_topology_groups_by_floor(self):
-        aps = [
-            APInfo(hostname="golem", instance="golem:9100"),
-            APInfo(hostname="albert", instance="albert:9100"),
-        ]
-        locations = {
-            "golem": "Ground floor / Living room",
-            "albert": "First floor / Bedroom",
-        }
-        parsed = json.loads(generate_dashboard(aps, ap_locations=locations))
-        topo = next(p for p in parsed["panels"] if p["title"] == "AP Topology")
-        elements = topo["options"]["root"]["elements"]
-        names = [e["name"] for e in elements]
-        assert "floor-Ground floor" in names
-        assert "floor-First floor" in names
-        assert "ap-golem" in names
-        assert "ap-albert" in names
+        assert "Clients per AP" in titles
 
 
 class TestDashboardAPI:
