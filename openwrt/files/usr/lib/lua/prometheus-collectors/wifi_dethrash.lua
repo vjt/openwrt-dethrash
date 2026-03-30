@@ -16,7 +16,6 @@ local function scrape()
   if not u then return end
 
   local status = u:call("network.wireless", "status", {})
-  u:close()
 
   if not status then return end
 
@@ -95,7 +94,41 @@ local function scrape()
     end)
   end
 
-  -- Phase 3: UCI usteer config
+  -- Phase 3: usteer runtime data (hearing map, roam events, load)
+  pcall(function()
+    local local_info = u:call("usteer", "local_info", {})
+    if local_info then
+      local metric_roam_source = metric("wifi_usteer_roam_events_source", "gauge")
+      local metric_roam_target = metric("wifi_usteer_roam_events_target", "gauge")
+      local metric_load = metric("wifi_usteer_load", "gauge")
+      local metric_assoc = metric("wifi_usteer_associated_clients", "gauge")
+
+      for iface, info in pairs(local_info) do
+        local labels = {interface = iface, ssid = info.ssid or "", freq = tostring(info.freq or 0)}
+        local re = info.roam_events or {}
+        metric_roam_source(labels, re.source or 0)
+        metric_roam_target(labels, re.target or 0)
+        metric_load(labels, info.load or 0)
+        metric_assoc(labels, info.n_assoc or 0)
+      end
+    end
+
+    local clients = u:call("usteer", "get_clients", {})
+    if clients then
+      local metric_hearing = metric("wifi_usteer_hearing_signal_dbm", "gauge")
+      local metric_connected = metric("wifi_usteer_hearing_connected", "gauge")
+
+      for mac, nodes in pairs(clients) do
+        for node, info in pairs(nodes) do
+          local labels = {mac = mac, node = node}
+          metric_hearing(labels, info.signal or 0)
+          metric_connected(labels, info.connected and 1 or 0)
+        end
+      end
+    end
+  end)
+
+  -- Phase 4: UCI usteer config
   pcall(function()
     local metric_min_connect_snr = metric("wifi_usteer_min_connect_snr", "gauge")
     local metric_min_snr = metric("wifi_usteer_min_snr", "gauge")
@@ -124,6 +157,8 @@ local function scrape()
       end
     end
   end)
+
+  u:close()
 end
 
 return {scrape = scrape}

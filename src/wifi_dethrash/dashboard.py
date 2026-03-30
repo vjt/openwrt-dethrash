@@ -7,6 +7,9 @@ def _build_clients_panel(
     snr_expr: str,
     panel_id: int,
     y_offset: int,
+    width: int = 12,
+    x_offset: int = 0,
+    height: int = 8,
 ) -> dict[str, object]:
     """Build a table showing connected clients, avg RSSI, and avg SNR per AP."""
     return {
@@ -14,7 +17,7 @@ def _build_clients_panel(
         "title": "Clients per AP",
         "description": "Live client count and average signal quality per AP. RSSI and SNR cells colored by quality thresholds.",
         "type": "table",
-        "gridPos": {"h": 8, "w": 24, "x": 0, "y": y_offset},
+        "gridPos": {"h": height, "w": width, "x": x_offset, "y": y_offset},
         "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
         "targets": [
             {
@@ -153,376 +156,199 @@ def _build_panels(
         }},
     ]
 
+    y = 0
     panels: list[dict[str, object]] = [
+        # === TOP: at-a-glance ===
         {
-            "id": 1,
-            "title": "Signal Quality",
-            "description": "RSSI (solid), SNR (dashed), and noise floor (dotted red) per station. Noise only shows for APs the selected station is connected to.",
-            "type": "timeseries",
-            "gridPos": {"h": 10, "w": 24, "x": 0, "y": 0},
+            "id": 1, "title": "Roaming Timeline",
+            "description": "Which AP each station is connected to over time. Color changes = roaming events.",
+            "type": "state-timeline",
+            "gridPos": {"h": 10, "w": 24, "x": 0, "y": (y := 0)},
             "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
-            "targets": [
-                {
-                    "refId": "A",
-                    "expr": _wrap_label_map(rssi_expr, mac_names),
-                    "legendFormat": "RSSI {{instance}} / {{mac}}",
-                },
-                {
-                    "refId": "B",
-                    "expr": _wrap_label_map(snr_expr, mac_names),
-                    "legendFormat": "SNR {{instance}} / {{mac}}",
-                },
-                {
-                    "refId": "C",
-                    "expr": (
-                        f'wifi_network_noise_dbm{{instance=~"{instance_re}"}}'
-                        f' and on(instance, ifname)'
-                        f' (group by (instance, ifname)({_wrap_label_map(rssi_expr, mac_names)}))'
-                    ),
-                    "legendFormat": "Noise {{instance}} / {{ifname}}",
-                },
-            ],
-            "fieldConfig": {
-                "defaults": {
-                    "unit": "dBm",
-                    "custom": {"drawStyle": "line", "lineWidth": 1},
-                },
-                "overrides": [
-                    {"matcher": {"id": "byFrameRefID", "options": "B"}, "properties": [
-                        {"id": "custom.lineStyle", "value": {"fill": "dash", "dash": [10, 5]}},
-                    ]},
-                    {"matcher": {"id": "byFrameRefID", "options": "C"}, "properties": [
-                        {"id": "custom.lineWidth", "value": 2},
-                        {"id": "custom.lineStyle", "value": {"fill": "dot"}},
-                        {"id": "color", "value": {"mode": "fixed", "fixedColor": "dark-red"}},
-                    ]},
-                ],
-            },
-            "options": {"tooltip": {"mode": "multi"}},
+            "targets": [{"refId": "A", "expr": roaming_expr, "legendFormat": "{{mac}}"}],
+            "fieldConfig": {"defaults": {"mappings": roaming_mappings, "custom": {"fillOpacity": 80}}, "overrides": []},
+            "options": {"showValue": "auto", "mergeValues": True, "alignValue": "left",
+                        "legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "single"}},
         },
         {
-            "id": 3,
-            "title": "Connect/Disconnect Events",
-            "description": "Hostapd AP-STA-CONNECTED/DISCONNECTED events with resolved station names. Green = connect, red = disconnect.",
+            "id": 2, "title": "Signal Quality",
+            "description": "RSSI (solid), SNR (dashed), and noise floor (dotted red) per station. Noise only shows for APs the selected station is connected to.",
+            "type": "timeseries",
+            "gridPos": {"h": 14, "w": 24, "x": 0, "y": (y := y + 10)},
+            "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+            "targets": [
+                {"refId": "A", "expr": _wrap_label_map(rssi_expr, mac_names), "legendFormat": "RSSI {{instance}} / {{mac}}"},
+                {"refId": "B", "expr": _wrap_label_map(snr_expr, mac_names), "legendFormat": "SNR {{instance}} / {{mac}}"},
+                {"refId": "C", "legendFormat": "Noise {{instance}} / {{ifname}}", "expr": (
+                    f'wifi_network_noise_dbm{{instance=~"{instance_re}"}}'
+                    f' and on(instance, ifname) (group by (instance, ifname)({_wrap_label_map(rssi_expr, mac_names)}))'
+                )},
+            ],
+            "fieldConfig": {"defaults": {"unit": "dBm", "custom": {"drawStyle": "line", "lineWidth": 1}}, "overrides": [
+                {"matcher": {"id": "byFrameRefID", "options": "B"}, "properties": [
+                    {"id": "custom.lineStyle", "value": {"fill": "dash", "dash": [10, 5]}}]},
+                {"matcher": {"id": "byFrameRefID", "options": "C"}, "properties": [
+                    {"id": "custom.lineWidth", "value": 2},
+                    {"id": "custom.lineStyle", "value": {"fill": "dot"}},
+                    {"id": "color", "value": {"mode": "fixed", "fixedColor": "dark-red"}}]},
+            ]},
+            "options": {"tooltip": {"mode": "multi"},
+                        "legend": {"displayMode": "table", "placement": "right", "calcs": ["lastNotNull"]}},
+        },
+        # === MIDDLE: events + clients side by side ===
+        {
+            "id": 3, "title": "Connect/Disconnect Events",
+            "description": "Hostapd connect/disconnect events with resolved station names.",
             "type": "logs",
-            "gridPos": {"h": 8, "w": 24, "x": 0, "y": 10},
+            "gridPos": {"h": 12, "w": 12, "x": 0, "y": (y := y + 14)},
             "datasource": {"type": "victoriametrics-logs-datasource", "uid": "${DS_VICTORIALOGS}"},
             "targets": [
-                {
-                    "refId": "A",
-                    "expr": (
-                        'tags.appname:hostapd AND _msg:AP-STA-CONNECTED AND _msg:auth_alg'
-                        ' AND fields.station:~"$station"'
-                        ' | extract "AP-STA-CONNECTED <mac> auth_alg=<auth>" from _msg'
-                        ' | format "🟢 <_time> <fields.station> ▸ <tags.hostname> (<auth>) · <mac>" as _msg'
-                    ),
-                },
-                {
-                    "refId": "B",
-                    "expr": (
-                        'tags.appname:hostapd AND _msg:AP-STA-CONNECTED AND NOT _msg:auth_alg'
-                        ' AND fields.station:~"$station"'
-                        ' | extract "AP-STA-CONNECTED <mac>" from _msg'
-                        ' | format "🟢 <_time> <fields.station> ▸ <tags.hostname> (open) · <mac>" as _msg'
-                    ),
-                },
-                {
-                    "refId": "C",
-                    "expr": (
-                        'tags.appname:hostapd AND _msg:AP-STA-DISCONNECTED AND fields.station:~"$station"'
-                        ' | extract "AP-STA-DISCONNECTED <mac>" from _msg'
-                        ' | format "🔴 <_time> <fields.station> ◂ <tags.hostname> · <mac>" as _msg'
-                    ),
-                },
+                {"refId": "A", "expr": (
+                    'tags.appname:hostapd AND _msg:AP-STA-CONNECTED AND _msg:auth_alg AND fields.station:~"$station"'
+                    ' | extract "AP-STA-CONNECTED <mac> auth_alg=<auth>" from _msg'
+                    ' | format "🟢 <_time> <fields.station> ▸ <tags.hostname> (<auth>) · <mac>" as _msg')},
+                {"refId": "B", "expr": (
+                    'tags.appname:hostapd AND _msg:AP-STA-CONNECTED AND NOT _msg:auth_alg AND fields.station:~"$station"'
+                    ' | extract "AP-STA-CONNECTED <mac>" from _msg'
+                    ' | format "🟢 <_time> <fields.station> ▸ <tags.hostname> (open) · <mac>" as _msg')},
+                {"refId": "C", "expr": (
+                    'tags.appname:hostapd AND _msg:AP-STA-DISCONNECTED AND fields.station:~"$station"'
+                    ' | extract "AP-STA-DISCONNECTED <mac>" from _msg'
+                    ' | format "🔴 <_time> <fields.station> ◂ <tags.hostname> · <mac>" as _msg')},
             ],
             "options": {},
         },
+        _build_clients_panel(instance_re, snr_expr, panel_id=4, y_offset=y, width=12, x_offset=12, height=12),
+        # === ACTIVITY: time series ===
         {
-            "id": 4,
-            "title": "TX Power by Radio",
-            "description": "Current transmit power per radio. Higher = more coverage but more overlap between APs.",
-            "type": "bargauge",
-            "gridPos": {"h": 8, "w": 12, "x": 0, "y": 18},
-            "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
-            "targets": [
-                {
-                    "refId": "A",
-                    "expr": f'wifi_radio_txpower_dbm{{instance=~"{instance_re}"}}',
-                    "instant": True,
-                    "legendFormat": "{{instance}} / {{device}} ({{ssid}})",
-                },
-            ],
-            "fieldConfig": {
-                "defaults": {
-                    "unit": "dBm",
-                    "min": 0,
-                    "max": 30,
-                    "thresholds": {
-                        "mode": "absolute",
-                        "steps": [
-                            {"color": "yellow", "value": None},
-                            {"color": "green", "value": 10},
-                            {"color": "orange", "value": 23},
-                        ],
-                    },
-                },
-                "overrides": [],
-            },
-            "options": {
-                "orientation": "horizontal",
-                "displayMode": "gradient",
-                "showUnfilled": True,
-                "valueMode": "color",
-                "textSizeMode": "auto",
-            },
+            "id": 5, "title": "Connects per Hour",
+            "description": "AP-STA-CONNECTED events stacked by AP. Spikes indicate thrashing or mass reconnections.",
+            "type": "timeseries", "interval": "1m",
+            "gridPos": {"h": 8, "w": 24, "x": 0, "y": (y := y + 12)},
+            "datasource": {"type": "victoriametrics-logs-datasource", "uid": "${DS_VICTORIALOGS}"},
+            "targets": [{"refId": "A", "queryType": "statsRange", "legendFormat": "{{tags.hostname}}", "expr": (
+                'tags.appname:hostapd AND _msg:AP-STA-CONNECTED AND fields.station:~"$station"'
+                ' | stats by (tags.hostname) count() connects')}],
+            "fieldConfig": {"defaults": {"unit": "short", "noValue": "0", "custom": {
+                "drawStyle": "line", "lineWidth": 2, "fillOpacity": 20,
+                "stacking": {"mode": "normal"}, "showPoints": "never"}}, "overrides": []},
+            "options": {"tooltip": {"mode": "multi", "sort": "desc"},
+                        "legend": {"displayMode": "list", "placement": "bottom"}},
         },
         {
-            "id": 5,
-            "title": "802.11r/k/v Status",
-            "description": "Fast roaming support per AP. 3/3 = all protocols enabled (r=fast transition, k=neighbor reports, v=BSS transition).",
-            "type": "table",
-            "gridPos": {"h": 8, "w": 12, "x": 12, "y": 18},
-            "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
-            "targets": [
-                {
-                    "refId": "A",
-                    "expr": (
-                        f'wifi_iface_ieee80211r_enabled{{instance=~"{instance_re}"}}'
-                        f' + on(instance, device, ifname, ssid) wifi_iface_ieee80211k_enabled'
-                        f' + on(instance, device, ifname, ssid) wifi_iface_ieee80211v_enabled'
-                    ),
-                    "instant": True,
-                    "format": "table",
-                },
-            ],
-            "transformations": [
-                {"id": "organize", "options": {
-                    "excludeByName": {
-                        "Time": True, "__name__": True, "device": True,
-                        "ifname": True, "metric_format": True, "metric_source": True,
-                    },
-                    "renameByName": {
-                        "instance": "AP",
-                        "ssid": "SSID",
-                        "Value": "Score",
-                    },
-                    "indexByName": {"instance": 0, "ssid": 1, "Value": 2},
-                }},
-            ],
-            "fieldConfig": {
-                "defaults": {},
-                "overrides": [
-                    {"matcher": {"id": "byName", "options": "Score"}, "properties": [
-                        {"id": "mappings", "value": [
-                            {"type": "value", "options": {
-                                "0": {"text": "❌ 0/3", "color": "red"},
-                                "1": {"text": "⚠️ 1/3", "color": "yellow"},
-                                "2": {"text": "⚠️ 2/3", "color": "yellow"},
-                                "3": {"text": "✅ 3/3", "color": "green"},
-                            }},
-                        ]},
-                        {"id": "custom.cellOptions", "value": {
-                            "type": "color-background", "mode": "basic",
-                        }},
-                        {"id": "thresholds", "value": {
-                            "mode": "absolute",
-                            "steps": [
-                                {"color": "red", "value": None},
-                                {"color": "yellow", "value": 1},
-                                {"color": "green", "value": 3},
-                            ],
-                        }},
-                    ]},
-                ],
-            },
-            "options": {
-                "sortBy": [{"displayName": "AP"}],
-            },
-        },
-        {
-            "id": 6,
-            "title": "usteer Config",
-            "description": "Key usteer roaming parameters. signal_diff = min dB improvement to trigger roam, roam_scan_snr = min SNR to start scanning.",
-            "type": "stat",
-            "gridPos": {"h": 4, "w": 24, "x": 0, "y": 24},
-            "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
-            "targets": [
-                {
-                    "refId": "A",
-                    "expr": "avg(wifi_usteer_signal_diff_threshold)",
-                    "legendFormat": "signal_diff",
-                },
-                {
-                    "refId": "B",
-                    "expr": "avg(wifi_usteer_roam_scan_snr)",
-                    "legendFormat": "roam_scan_snr",
-                },
-            ],
-            "fieldConfig": {
-                "defaults": {
-                    "unit": "dB",
-                    "thresholds": {
-                        "mode": "absolute",
-                        "steps": [
-                            {"color": "blue", "value": None},
-                        ],
-                    },
-                },
-                "overrides": [],
-            },
-            "options": {
-                "textMode": "value_and_name",
-                "colorMode": "background",
-                "graphMode": "none",
-                "reduceOptions": {"calcs": ["lastNotNull"]},
-            },
-        },
-        {
-            "id": 7,
-            "title": "Connects per Hour",
-            "description": "AP-STA-CONNECTED events per hour, stacked by AP. Spikes indicate thrashing or mass reconnections.",
-            "type": "timeseries",
-            "interval": "1m",
-            "gridPos": {"h": 8, "w": 24, "x": 0, "y": 28},
+            "id": 6, "title": "FT vs Open Connects",
+            "description": "Fast transition (802.11r) roams vs plain open connections.",
+            "type": "timeseries", "interval": "1m",
+            "gridPos": {"h": 8, "w": 24, "x": 0, "y": (y := y + 8)},
             "datasource": {"type": "victoriametrics-logs-datasource", "uid": "${DS_VICTORIALOGS}"},
             "targets": [
-                {
-                    "refId": "A",
-                    "queryType": "statsRange",
-                    "legendFormat": "{{tags.hostname}}",
-                    "expr": (
-                        'tags.appname:hostapd AND _msg:AP-STA-CONNECTED'
-                        ' AND fields.station:~"$station"'
-                        ' | stats by (tags.hostname) count() connects'
-                    ),
-                }
+                {"refId": "A", "queryType": "statsRange", "legendFormat": "ft roams", "expr": (
+                    'tags.appname:hostapd AND _msg:AP-STA-CONNECTED AND _msg:"auth_alg=ft" | stats count() ft_roams')},
+                {"refId": "B", "queryType": "statsRange", "legendFormat": "open connects", "expr": (
+                    'tags.appname:hostapd AND _msg:AP-STA-CONNECTED AND _msg:"auth_alg=open" | stats count() open_connects')},
             ],
-            "fieldConfig": {
-                "defaults": {
-                    "unit": "short",
-                    "custom": {
-                        "drawStyle": "line",
-                        "lineWidth": 2,
-                        "fillOpacity": 20,
-                        "stacking": {"mode": "normal"},
-                        "showPoints": "never",
-                    },
-                    "noValue": "0",
-                },
-                "overrides": [],
-            },
-            "options": {
-                "tooltip": {"mode": "multi", "sort": "desc"},
-                "legend": {"displayMode": "list", "placement": "bottom"},
-            },
-        },
-        {
-            "id": 8,
-            "title": "Roaming Timeline",
-            "description": "Which AP each station is connected to over time. Color changes = roaming events. Derived from RSSI metric presence.",
-            "type": "state-timeline",
-            "gridPos": {"h": 10, "w": 24, "x": 0, "y": 36},
-            "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
-            "targets": [
-                {
-                    "refId": "A",
-                    "expr": roaming_expr,
-                    "legendFormat": "{{mac}}",
-                }
-            ],
-            "fieldConfig": {
-                "defaults": {
-                    "mappings": roaming_mappings,
-                    "custom": {"fillOpacity": 80},
-                },
-                "overrides": [],
-            },
-            "options": {
-                "showValue": "auto",
-                "mergeValues": True,
-                "alignValue": "left",
-                "legend": {"displayMode": "list", "placement": "bottom"},
-                "tooltip": {"mode": "single"},
-            },
-        },
-        {
-            "id": 9,
-            "title": "RSSI Heatmap",
-            "description": "Signal strength distribution over time in 5 dBm bands. Darker = more readings in that band. Tight cluster = stable, spread = varying signal.",
-            "type": "heatmap",
-            "gridPos": {"h": 8, "w": 24, "x": 0, "y": 46},
-            "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
-            "targets": [
-                {
-                    "refId": "A",
-                    "expr": _wrap_label_map(rssi_expr, mac_names),
-                    "legendFormat": "{{instance}} / {{mac}}",
-                }
-            ],
-            "fieldConfig": {
-                "defaults": {"unit": "dBm"},
-                "overrides": [],
-            },
-            "options": {
-                "calculate": True,
-                "calculation": {"xBuckets": {"mode": "size"}, "yBuckets": {"mode": "size", "value": "5"}},
-                "color": {"mode": "scheme", "scheme": "Blues"},
-                "yAxis": {"unit": "dBm"},
-            },
-        },
-        {
-            "id": 11,
-            "title": "FT vs Open Connects",
-            "description": "Fast transition (802.11r) roams vs plain open connections. High FT ratio = clients are roaming seamlessly between APs.",
-            "type": "timeseries",
-            "interval": "1m",
-            "gridPos": {"h": 8, "w": 24, "x": 0, "y": 54},
-            "datasource": {"type": "victoriametrics-logs-datasource", "uid": "${DS_VICTORIALOGS}"},
-            "targets": [
-                {
-                    "refId": "A",
-                    "queryType": "statsRange",
-                    "legendFormat": "ft roams",
-                    "expr": (
-                        'tags.appname:hostapd AND _msg:AP-STA-CONNECTED AND _msg:"auth_alg=ft"'
-                        ' | stats count() ft_roams'
-                    ),
-                },
-                {
-                    "refId": "B",
-                    "queryType": "statsRange",
-                    "legendFormat": "open connects",
-                    "expr": (
-                        'tags.appname:hostapd AND _msg:AP-STA-CONNECTED AND _msg:"auth_alg=open"'
-                        ' | stats count() open_connects'
-                    ),
-                },
-            ],
-            "fieldConfig": {
-                "defaults": {
-                    "unit": "short",
-                    "custom": {"drawStyle": "line", "lineWidth": 2, "fillOpacity": 20, "showPoints": "never"},
-                    "noValue": "0",
-                },
+            "fieldConfig": {"defaults": {"unit": "short", "noValue": "0",
+                "custom": {"drawStyle": "line", "lineWidth": 2, "fillOpacity": 20, "showPoints": "never"}},
                 "overrides": [
-                    {
-                        "matcher": {"id": "byName", "options": "ft_roams"},
-                        "properties": [{"id": "color", "value": {"fixedColor": "orange", "mode": "fixed"}}],
-                    },
-                    {
-                        "matcher": {"id": "byName", "options": "open_connects"},
-                        "properties": [{"id": "color", "value": {"fixedColor": "blue", "mode": "fixed"}}],
-                    },
-                ],
-            },
+                    {"matcher": {"id": "byName", "options": "ft_roams"},
+                     "properties": [{"id": "color", "value": {"fixedColor": "orange", "mode": "fixed"}}]},
+                    {"matcher": {"id": "byName", "options": "open_connects"},
+                     "properties": [{"id": "color", "value": {"fixedColor": "blue", "mode": "fixed"}}]}]},
             "options": {"tooltip": {"mode": "multi"}},
         },
+        {
+            "id": 7, "title": "RSSI Heatmap",
+            "description": "Signal strength distribution over time in 5 dBm bands. Darker = more readings.",
+            "type": "heatmap",
+            "gridPos": {"h": 8, "w": 24, "x": 0, "y": (y := y + 8)},
+            "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+            "targets": [{"refId": "A", "expr": _wrap_label_map(rssi_expr, mac_names), "legendFormat": "{{instance}} / {{mac}}"}],
+            "fieldConfig": {"defaults": {"unit": "dBm"}, "overrides": []},
+            "options": {"calculate": True,
+                        "calculation": {"xBuckets": {"mode": "size"}, "yBuckets": {"mode": "size", "value": "5"}},
+                        "color": {"mode": "scheme", "scheme": "Blues"}, "yAxis": {"unit": "dBm"}},
+        },
+        # === BOTTOM: config reference (rarely changes) ===
+        {
+            "id": 8, "title": "TX Power by Radio",
+            "description": "Current transmit power per radio.",
+            "type": "bargauge",
+            "gridPos": {"h": 8, "w": 8, "x": 0, "y": (y := y + 8)},
+            "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+            "targets": [{"refId": "A", "expr": f'wifi_radio_txpower_dbm{{instance=~"{instance_re}"}}',
+                         "instant": True, "legendFormat": "{{instance}} / {{device}} ({{ssid}})"}],
+            "fieldConfig": {"defaults": {"unit": "dBm", "min": 0, "max": 30,
+                "thresholds": {"mode": "absolute", "steps": [
+                    {"color": "yellow", "value": None}, {"color": "green", "value": 10}, {"color": "orange", "value": 23}]}},
+                "overrides": []},
+            "options": {"orientation": "horizontal", "displayMode": "gradient",
+                        "showUnfilled": True, "valueMode": "color", "textSizeMode": "auto"},
+        },
+        {
+            "id": 9, "title": "802.11r/k/v Status",
+            "description": "Fast roaming protocol support per AP/SSID.",
+            "type": "table",
+            "gridPos": {"h": 8, "w": 8, "x": 8, "y": y},
+            "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+            "targets": [{"refId": "A", "instant": True, "format": "table", "expr": (
+                f'wifi_iface_ieee80211r_enabled{{instance=~"{instance_re}"}}'
+                f' + on(instance, device, ifname, ssid) wifi_iface_ieee80211k_enabled'
+                f' + on(instance, device, ifname, ssid) wifi_iface_ieee80211v_enabled')}],
+            "transformations": [{"id": "organize", "options": {
+                "excludeByName": {"Time": True, "__name__": True, "device": True,
+                                  "ifname": True, "metric_format": True, "metric_source": True},
+                "renameByName": {"instance": "AP", "ssid": "SSID", "Value": "Score"},
+                "indexByName": {"instance": 0, "ssid": 1, "Value": 2}}}],
+            "fieldConfig": {"defaults": {}, "overrides": [
+                {"matcher": {"id": "byName", "options": "Score"}, "properties": [
+                    {"id": "mappings", "value": [{"type": "value", "options": {
+                        "0": {"text": "❌ 0/3", "color": "red"}, "1": {"text": "⚠️ 1/3", "color": "yellow"},
+                        "2": {"text": "⚠️ 2/3", "color": "yellow"}, "3": {"text": "✅ 3/3", "color": "green"}}}]},
+                    {"id": "custom.cellOptions", "value": {"type": "color-background", "mode": "basic"}},
+                    {"id": "thresholds", "value": {"mode": "absolute", "steps": [
+                        {"color": "red", "value": None}, {"color": "yellow", "value": 1}, {"color": "green", "value": 3}]}}]}]},
+            "options": {"sortBy": [{"displayName": "AP"}]},
+        },
+        {
+            "id": 10, "title": "usteer Config",
+            "description": "Current usteer roaming parameters across all APs.",
+            "type": "table",
+            "gridPos": {"h": 8, "w": 8, "x": 16, "y": y},
+            "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+            "targets": [
+                {"refId": "A", "expr": "avg(wifi_usteer_signal_diff_threshold)", "instant": True, "format": "table"},
+                {"refId": "B", "expr": "avg(wifi_usteer_roam_scan_snr)", "instant": True, "format": "table"},
+                {"refId": "C", "expr": "avg(wifi_usteer_roam_trigger_snr)", "instant": True, "format": "table"},
+                {"refId": "D", "expr": "avg(wifi_usteer_min_snr)", "instant": True, "format": "table"},
+                {"refId": "E", "expr": "avg(wifi_usteer_min_connect_snr)", "instant": True, "format": "table"},
+                {"refId": "F", "expr": "avg(wifi_usteer_load_kick_enabled)", "instant": True, "format": "table"},
+            ],
+            "transformations": [
+                {"id": "merge"},
+                {"id": "organize", "options": {
+                    "excludeByName": {"Time": True},
+                    "renameByName": {
+                        "Value #A": "signal_diff",
+                        "Value #B": "roam_scan_snr",
+                        "Value #C": "roam_trigger_snr",
+                        "Value #D": "min_snr",
+                        "Value #E": "min_connect_snr",
+                        "Value #F": "load_kick",
+                    },
+                }},
+                {"id": "reduce", "options": {"reducers": ["lastNotNull"], "includeTimeField": False}},
+                {"id": "organize", "options": {
+                    "renameByName": {"Field": "Parameter", "Last *": "Value"},
+                }},
+            ],
+            "fieldConfig": {"defaults": {"unit": "dB"}, "overrides": [
+                {"matcher": {"id": "byName", "options": "load_kick"}, "properties": [
+                    {"id": "unit", "value": "bool_on_off"},
+                ]},
+            ]},
+            "options": {},
+        },
     ]
-
-    last_y = max(p["gridPos"]["y"] + p["gridPos"]["h"]  # type: ignore[operator]
-                 for p in panels)
-    panels.append(_build_clients_panel(
-        instance_re, snr_expr, panel_id=len(panels) + 1, y_offset=last_y))
 
     return panels
 
@@ -573,6 +399,7 @@ def _dashboard_shell(panels: list[dict[str, object]]) -> dict[str, object]:
         "panels": panels,
         "time": {"from": "now-24h", "to": "now"},
         "refresh": "30s",
+        "graphTooltip": 1,
         "templating": {"list": variables},
         "annotations": {"list": []},
     }
