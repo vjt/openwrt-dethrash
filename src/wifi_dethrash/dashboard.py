@@ -105,7 +105,7 @@ def _with_station(expr: str) -> str:
     """
     return (
         f'label_match('
-        f'{expr} * on(mac) group_left(station) wifi_station_name_gauge'
+        f'({expr}) * on(mac) group_left(station) wifi_station_name_gauge'
         f', "station", "$station")'
     )
 
