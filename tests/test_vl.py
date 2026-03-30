@@ -108,44 +108,42 @@ class TestFetchEvents:
         assert events[1].time == "2026-02-16T08:00:00Z"
 
 
-DHCP_RESPONSE = (
-    # Technitium format (dash-separated MAC) — use TEST-NET IPs that won't reverse-resolve
-    '{"_msg":"[2026-03-29 13:44:14 UTC] DHCP Server leased IP address [198.51.100.41] to enterprise [84-2F-57-07-9E-3D] for scope: Default","tags.appname":"docker"}\n'
-    '{"_msg":"[2026-03-29 13:38:08 UTC] DHCP Server leased IP address [198.51.100.21] to tv [E0-85-4D-B3-BC-C0] for scope: Default","tags.appname":"docker"}\n'
-    # dnsmasq format (colon-separated MAC)
-    '{"_msg":"DHCPACK(br-lan) 198.51.100.164 7e:0b:7c:b7:30:8e Watch","tags.appname":"dnsmasq-dhcp"}\n'
+CONNECT_EVENTS_RESPONSE = (
+    '{"_msg":"phy1-ap0: AP-STA-CONNECTED 84:2f:57:07:9e:3d auth_alg=open","fields.station":"enterprise","tags.appname":"hostapd"}\n'
+    '{"_msg":"phy1-ap0: AP-STA-CONNECTED E0:85:4D:B3:BC:C0 auth_alg=ft","fields.station":"tv","tags.appname":"hostapd"}\n'
+    '{"_msg":"phy0-ap0: AP-STA-CONNECTED 84:2f:57:07:9e:3d auth_alg=ft","fields.station":"enterprise","tags.appname":"hostapd"}\n'
 )
 
 
-class TestFetchMacNames:
-    def test_parses_technitium_format(self, respx_mock):
+class TestFetchWifiStations:
+    def test_extracts_mac_to_hostname(self, respx_mock):
         respx_mock.get("http://vl:9428/select/logsql/query").respond(
-            text=DHCP_RESPONSE,
+            text=CONNECT_EVENTS_RESPONSE,
         )
 
         client = VictoriaLogsClient("http://vl:9428")
-        names = client.fetch_mac_names()
+        names, stations = client.fetch_wifi_stations()
 
         assert names["84:2f:57:07:9e:3d"] == "enterprise"
         assert names["e0:85:4d:b3:bc:c0"] == "tv"
 
-    def test_parses_dnsmasq_format(self, respx_mock):
+    def test_returns_sorted_station_list(self, respx_mock):
         respx_mock.get("http://vl:9428/select/logsql/query").respond(
-            text=DHCP_RESPONSE,
+            text=CONNECT_EVENTS_RESPONSE,
         )
 
         client = VictoriaLogsClient("http://vl:9428")
-        names = client.fetch_mac_names()
+        _, stations = client.fetch_wifi_stations()
 
-        assert names["7e:0b:7c:b7:30:8e"] == "Watch"
+        assert stations == ["enterprise", "tv"]
 
     def test_all_macs_lowercase(self, respx_mock):
         respx_mock.get("http://vl:9428/select/logsql/query").respond(
-            text=DHCP_RESPONSE,
+            text=CONNECT_EVENTS_RESPONSE,
         )
 
         client = VictoriaLogsClient("http://vl:9428")
-        names = client.fetch_mac_names()
+        names, _ = client.fetch_wifi_stations()
 
         assert all(k == k.lower() for k in names)
 
@@ -153,6 +151,7 @@ class TestFetchMacNames:
         respx_mock.get("http://vl:9428/select/logsql/query").respond(text="")
 
         client = VictoriaLogsClient("http://vl:9428")
-        names = client.fetch_mac_names()
+        names, stations = client.fetch_wifi_stations()
 
         assert names == {}
+        assert stations == []

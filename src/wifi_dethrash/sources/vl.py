@@ -1,7 +1,6 @@
 import json
 import logging
 import re
-import socket
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -13,16 +12,6 @@ _MSG_RE = re.compile(
     r"([\w-]+): AP-STA-(CONNECTED|DISCONNECTED) "
     r"([0-9a-fA-F:]{17})"
     r"(?: auth_alg=(\w+))?"
-)
-
-# dnsmasq: DHCPACK(br-lan) 192.168.42.41 84:2f:57:07:9e:3d enterprise
-_DNSMASQ_DHCP_RE = re.compile(
-    r"DHCPACK\(\S+\)\s+\S+\s+([0-9a-fA-F:]{17})\s+(\S+)"
-)
-
-# Technitium: DHCP Server leased IP address [192.168.42.41] to enterprise [84-2F-57-07-9E-3D]
-_TECHNITIUM_DHCP_RE = re.compile(
-    r"DHCP Server leased IP address \[(\S+)\] to (\S+) \[([0-9a-fA-F-]{17})\]"
 )
 
 
@@ -100,29 +89,31 @@ class VictoriaLogsClient:
         events.sort(key=lambda e: e.time)
         return events
 
-    def fetch_mac_names(self, limit: int = 10000) -> dict[str, str]:
-        """Resolve MAC addresses to hostnames from DHCP logs.
+    def fetch_wifi_stations(self, limit: int = 10000) -> tuple[dict[str, str], list[str]]:
+        """Extract MAC→hostname mapping and station list from hostapd events.
 
-        Parses both Technitium and dnsmasq DHCP log formats.
-        Prefers DNS reverse lookup (authoritative name) over DHCP
-        client-provided hostname when IP is available.
-        Returns dict mapping lowercase colon-separated MAC to hostname.
+        Parses AP-STA-CONNECTED events that have fields.station (set by
+        station-resolver). Returns (mac_names, station_list) where:
+        - mac_names: lowercase MAC → hostname for Prometheus label_map
+        - station_list: sorted unique hostnames for the dropdown
+        Only includes actual WiFi clients, not all DHCP leases.
         """
         resp = self._client.get(
             f"{self._base_url}/select/logsql/query",
             params={
                 "query": (
-                    "(tags.appname:docker AND _msg:\"DHCP Server leased\")"
-                    " OR "
-                    "(tags.appname:dnsmasq-dhcp AND _msg:DHCPACK)"
+                    "tags.appname:hostapd AND _msg:AP-STA-CONNECTED"
+                    " AND fields.station:*"
                 ),
                 "limit": str(limit),
             },
         )
         resp.raise_for_status()
 
+        # MAC regex: 17-char colon-separated hex
+        mac_re = re.compile(r"AP-STA-CONNECTED ([0-9a-fA-F:]{17})")
+
         names: dict[str, str] = {}
-        mac_ips: dict[str, str] = {}
         for line in resp.text.strip().split("\n"):
             if not line:
                 continue
@@ -130,34 +121,14 @@ class VictoriaLogsClient:
                 row = json.loads(line)
             except json.JSONDecodeError:
                 continue
-            msg = row.get("_msg", "")
 
-            # Technitium: DHCP Server leased IP address [ip] to hostname [AA-BB-CC-DD-EE-FF]
-            m = _TECHNITIUM_DHCP_RE.search(msg)
-            if m:
-                ip = m.group(1)
-                hostname = m.group(2)
-                mac = m.group(3).replace("-", ":").lower()
-                names[mac] = hostname
-                mac_ips[mac] = ip
+            station = row.get("fields.station") or row.get("station", "")
+            if not station:
                 continue
 
-            # dnsmasq: DHCPACK(br-lan) ip aa:bb:cc:dd:ee:ff hostname
-            m = _DNSMASQ_DHCP_RE.search(msg)
+            m = mac_re.search(row.get("_msg", ""))
             if m:
-                mac = m.group(1).lower()
-                hostname = m.group(2)
-                names[mac] = hostname
+                names[m.group(1).lower()] = station
 
-        # Prefer DNS reverse lookup over DHCP client hostname
-        for mac, ip in mac_ips.items():
-            try:
-                dns_name = socket.gethostbyaddr(ip)[0]
-                # Strip domain suffix for display
-                short = dns_name.split(".")[0]
-                if short:
-                    names[mac] = short
-            except (socket.herror, OSError):
-                pass
-
-        return names
+        stations = sorted(set(names.values()), key=str.lower)
+        return names, stations
