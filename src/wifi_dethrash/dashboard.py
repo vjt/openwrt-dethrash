@@ -96,28 +96,18 @@ def _build_clients_panel(
     }
 
 
-def _label_map_args(mac_names: dict[str, str]) -> str:
-    """Build label_map() arguments for MAC→hostname substitution.
+def _with_station(expr: str) -> str:
+    """Add station name via group_left join and filter by $station variable.
 
-    VictoriaMetrics MetricsQL: label_map(q, "label", "src1", "dst1", ...)
-    MACs uppercased to match Prometheus label values.
+    Joins with wifi_station_name_gauge (from station-resolver) to add
+    the 'station' label, then filters by the dashboard's $station variable.
+    Fully dynamic — no baked-in MAC→hostname mapping needed.
     """
-    pairs = ", ".join(
-        f'"{mac.upper()}", "{name}"'
-        for mac, name in sorted(mac_names.items())
+    return (
+        f'label_match('
+        f'{expr} * on(mac) group_left(station) wifi_station_name_gauge'
+        f', "station", "$station")'
     )
-    return f'"mac", {pairs}'
-
-
-def _wrap_label_map(expr: str, mac_names: dict[str, str] | None) -> str:
-    """Wrap a PromQL expression with label_map() and station filter.
-
-    Uses $station variable (allValue=".*") for regex matching in both
-    Prometheus (label_match) and VL (fields.station:~"$station") panels.
-    """
-    if mac_names:
-        return f'label_match(label_map({expr}, {_label_map_args(mac_names)}), "mac", "$station")'
-    return expr
 
 
 _AP_COLORS = [
@@ -129,7 +119,6 @@ _AP_COLORS = [
 
 def _build_panels(
     aps: list[APInfo],
-    mac_names: dict[str, str] | None = None,
 ) -> list[dict[str, object]]:
     """Build panel list with datasource placeholders."""
     instance_re = "|".join(a.instance for a in aps)
@@ -148,7 +137,7 @@ def _build_panels(
         for i, ap in enumerate(aps, 1)
     ]
     roaming_expr = " or ".join(roaming_parts)
-    roaming_expr = _wrap_label_map(roaming_expr, mac_names)
+    roaming_expr = _with_station(roaming_expr)
     roaming_mappings: list[dict[str, object]] = [
         {"type": "value", "options": {
             str(i): {"text": ap.hostname, "color": _AP_COLORS[(i - 1) % len(_AP_COLORS)]}
@@ -165,7 +154,7 @@ def _build_panels(
             "type": "state-timeline",
             "gridPos": {"h": 10, "w": 24, "x": 0, "y": (y := 0)},
             "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
-            "targets": [{"refId": "A", "expr": roaming_expr, "legendFormat": "{{mac}}"}],
+            "targets": [{"refId": "A", "expr": roaming_expr, "legendFormat": "{{station}}"}],
             "fieldConfig": {"defaults": {"mappings": roaming_mappings, "custom": {"fillOpacity": 80}}, "overrides": []},
             "options": {"showValue": "auto", "mergeValues": True, "alignValue": "left",
                         "legend": {"displayMode": "list", "placement": "bottom"}, "tooltip": {"mode": "single"}},
@@ -177,11 +166,11 @@ def _build_panels(
             "gridPos": {"h": 14, "w": 24, "x": 0, "y": (y := y + 10)},
             "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
             "targets": [
-                {"refId": "A", "expr": _wrap_label_map(rssi_expr, mac_names), "legendFormat": "RSSI {{instance}} / {{mac}}"},
-                {"refId": "B", "expr": _wrap_label_map(snr_expr, mac_names), "legendFormat": "SNR {{instance}} / {{mac}}"},
+                {"refId": "A", "expr": _with_station(rssi_expr), "legendFormat": "RSSI {{instance}} / {{station}}"},
+                {"refId": "B", "expr": _with_station(snr_expr), "legendFormat": "SNR {{instance}} / {{station}}"},
                 {"refId": "C", "legendFormat": "Noise {{instance}} / {{ifname}}", "expr": (
                     f'wifi_network_noise_dbm{{instance=~"{instance_re}"}}'
-                    f' and on(instance, ifname) (group by (instance, ifname)({_wrap_label_map(rssi_expr, mac_names)}))'
+                    f' and on(instance, ifname) (group by (instance, ifname)({_with_station(rssi_expr)}))'
                 )},
             ],
             "fieldConfig": {"defaults": {"unit": "dBm", "custom": {"drawStyle": "line", "lineWidth": 1}}, "overrides": [
@@ -202,11 +191,10 @@ def _build_panels(
             "type": "timeseries",
             "gridPos": {"h": 10, "w": 24, "x": 0, "y": (y := y + 14)},
             "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
-            "targets": [{"refId": "A", "legendFormat": "{{mac}} · {{ap}}", "expr":
-                         _wrap_label_map(
+            "targets": [{"refId": "A", "legendFormat": "{{station}} · {{ap}}", "expr":
+                         _with_station(
                              f'max by (mac, ap)(wifi_usteer_hearing_signal_dbm{{instance=~"{instance_re}"}})'
-                             f' and on(mac) group by (mac)(wifi_station_signal_dbm{{instance=~"{instance_re}"}})',
-                             mac_names)}],
+                             f' and on(mac) group by (mac)(wifi_station_signal_dbm{{instance=~"{instance_re}"}})')}],
             "fieldConfig": {"defaults": {"unit": "dBm", "custom": {"drawStyle": "line", "lineWidth": 2, "fillOpacity": 5}},
                 "overrides": []},
             "options": {"tooltip": {"mode": "multi"},
@@ -309,7 +297,7 @@ def _build_panels(
             "type": "heatmap",
             "gridPos": {"h": 8, "w": 24, "x": 0, "y": (y := y + 8)},
             "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
-            "targets": [{"refId": "A", "expr": _wrap_label_map(rssi_expr, mac_names), "legendFormat": "{{instance}} / {{mac}}"}],
+            "targets": [{"refId": "A", "expr": _with_station(rssi_expr), "legendFormat": "{{instance}} / {{station}}"}],
             "fieldConfig": {"defaults": {"unit": "dBm"}, "overrides": []},
             "options": {"calculate": True,
                         "calculation": {"xBuckets": {"mode": "size"}, "yBuckets": {"mode": "size", "value": "5"}},
@@ -459,7 +447,7 @@ def generate_dashboard(
 
     Output includes __inputs so the UI prompts for datasource selection.
     """
-    panels = _build_panels(aps, mac_names=None)
+    panels = _build_panels(aps)
     dashboard: dict[str, object] = {
         "__inputs": [
             {
@@ -500,13 +488,12 @@ def generate_dashboard_api(
     aps: list[APInfo],
     prometheus_uid: str,
     victorialogs_uid: str,
-    mac_names: dict[str, str] | None = None,
 ) -> dict[str, object]:
     """Generate Grafana dashboard dict for API push.
 
     Substitutes real datasource UIDs (no __inputs/__requires).
     """
-    panels = _build_panels(aps, mac_names=mac_names)
+    panels = _build_panels(aps)
     dashboard = {
         "uid": "wifi-dethrash",
         **_dashboard_shell(panels),

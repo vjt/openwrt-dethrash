@@ -146,20 +146,12 @@ def main(config_path, vm_url, vl_url, grafana_url, grafana_api_key,
                 return
 
             if push_dashboard:
-                dash_mac_names: dict[str, str] = {}
-                if effective_vl_url:
-                    click.echo("Resolving WiFi stations ...")
-                    with VictoriaLogsClient(effective_vl_url) as vl:
-                        dash_mac_names, _ = vl.fetch_wifi_stations()
-                    click.echo(f"Resolved {len(dash_mac_names)} MAC→hostname mappings")
-
                 with GrafanaClient(effective_grafana_url, effective_grafana_api_key) as gf:
                     datasources = gf.discover_datasources()
                     prom_uid = gf.find_datasource_uid(datasources, "prometheus")
                     vl_uid = gf.find_datasource_uid(
                         datasources, "victoriametrics-logs-datasource")
-                    dashboard = generate_dashboard_api(
-                        aps, prom_uid, vl_uid, mac_names=dash_mac_names)
+                    dashboard = generate_dashboard_api(aps, prom_uid, vl_uid)
                     url = gf.push_dashboard(dashboard)
                 click.echo(f"Dashboard pushed: {effective_grafana_url}{url}")
                 return
