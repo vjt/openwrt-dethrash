@@ -120,7 +120,7 @@ local function scrape()
 
       for mac, nodes in pairs(clients) do
         for node, info in pairs(nodes) do
-          local labels = {mac = mac, node = node}
+          local labels = {mac = mac:upper(), node = node}
           metric_hearing(labels, info.signal or 0)
           metric_connected(labels, info.connected and 1 or 0)
         end
