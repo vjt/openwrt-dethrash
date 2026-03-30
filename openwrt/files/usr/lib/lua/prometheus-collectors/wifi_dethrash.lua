@@ -96,31 +96,62 @@ local function scrape()
 
   -- Phase 3: usteer runtime data (hearing map, roam events, load)
   pcall(function()
+    local f = io.open("/proc/sys/kernel/hostname")
+    local hostname = f and f:read("*l") or "unknown"
+    if f then f:close() end
+
+    -- Collect local + remote info, build node→{ssid, ap_label} map
+    local node_map = {}  -- node_key → {ssid, ap_label}
     local local_info = u:call("usteer", "local_info", {})
     if local_info then
-      local metric_roam_source = metric("wifi_usteer_roam_events_source", "gauge")
-      local metric_roam_target = metric("wifi_usteer_roam_events_target", "gauge")
-      local metric_load = metric("wifi_usteer_load", "gauge")
-      local metric_assoc = metric("wifi_usteer_associated_clients", "gauge")
-
-      for iface, info in pairs(local_info) do
-        local labels = {interface = iface, ssid = info.ssid or "", freq = tostring(info.freq or 0)}
-        local re = info.roam_events or {}
-        metric_roam_source(labels, re.source or 0)
-        metric_roam_target(labels, re.target or 0)
-        metric_load(labels, info.load or 0)
-        metric_assoc(labels, info.n_assoc or 0)
+      for node_key, info in pairs(local_info) do
+        local ssid = info.ssid or ""
+        node_map[node_key] = {ssid = ssid, ap = hostname .. "/" .. ssid}
       end
     end
 
+    local remote_info = u:call("usteer", "remote_info", {})
+    if remote_info then
+      for node_key, info in pairs(remote_info) do
+        local ssid = info.ssid or ""
+        local ip = node_key:match("^(.+)#") or node_key
+        node_map[node_key] = {ssid = ssid, ap = ip .. "/" .. ssid}
+      end
+    end
+
+    -- Export roam events, load, clients from both local and remote
+    local metric_roam_source = metric("wifi_usteer_roam_events_source", "gauge")
+    local metric_roam_target = metric("wifi_usteer_roam_events_target", "gauge")
+    local metric_load = metric("wifi_usteer_load", "gauge")
+    local metric_assoc = metric("wifi_usteer_associated_clients", "gauge")
+
+    local function export_node_info(node_key, info)
+      local nm = node_map[node_key] or {ap = node_key}
+      local labels = {ap = nm.ap}
+      local re = info.roam_events or {}
+      metric_roam_source(labels, re.source or 0)
+      metric_roam_target(labels, re.target or 0)
+      metric_load(labels, info.load or 0)
+      metric_assoc(labels, info.n_assoc or 0)
+    end
+
+    if local_info then
+      for node_key, info in pairs(local_info) do export_node_info(node_key, info) end
+    end
+    if remote_info then
+      for node_key, info in pairs(remote_info) do export_node_info(node_key, info) end
+    end
+
+    -- Hearing map: signal per MAC per AP (uses node_map for labels)
     local clients = u:call("usteer", "get_clients", {})
     if clients then
       local metric_hearing = metric("wifi_usteer_hearing_signal_dbm", "gauge")
       local metric_connected = metric("wifi_usteer_hearing_connected", "gauge")
 
       for mac, nodes in pairs(clients) do
-        for node, info in pairs(nodes) do
-          local labels = {mac = mac:upper(), node = node}
+        for node_key, info in pairs(nodes) do
+          local nm = node_map[node_key] or {ap = node_key}
+          local labels = {mac = mac:upper(), ap = nm.ap}
           metric_hearing(labels, info.signal or 0)
           metric_connected(labels, info.connected and 1 or 0)
         end

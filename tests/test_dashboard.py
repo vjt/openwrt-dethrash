@@ -115,7 +115,7 @@ class TestDashboard:
     def test_panel_count(self):
         aps = [APInfo(hostname="mowgli", instance="mowgli:9100")]
         parsed = json.loads(generate_dashboard(aps))
-        assert len(parsed["panels"]) == 10
+        assert len(parsed["panels"]) == 13
 
     def test_has_clients_per_ap_panel(self):
         aps = [APInfo(hostname="mowgli", instance="mowgli:9100")]

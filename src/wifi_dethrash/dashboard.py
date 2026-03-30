@@ -195,12 +195,58 @@ def _build_panels(
             "options": {"tooltip": {"mode": "multi"},
                         "legend": {"displayMode": "table", "placement": "right", "calcs": ["lastNotNull"]}},
         },
+        # === usteer visibility ===
+        {
+            "id": 11, "title": "Hearing Map",
+            "description": "Signal strength of the selected station as seen by all APs. Shows usteer's roaming decision data — when signals cross, a roam happens. Select a single station for best results.",
+            "type": "timeseries",
+            "gridPos": {"h": 10, "w": 24, "x": 0, "y": (y := y + 14)},
+            "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+            "targets": [{"refId": "A", "legendFormat": "{{ap}}", "expr":
+                         _wrap_label_map(
+                             f'max by (mac, ap)(wifi_usteer_hearing_signal_dbm{{instance=~"{instance_re}"}})',
+                             mac_names)}],
+            "fieldConfig": {"defaults": {"unit": "dBm", "custom": {"drawStyle": "line", "lineWidth": 2, "fillOpacity": 5}},
+                "overrides": []},
+            "options": {"tooltip": {"mode": "multi"},
+                        "legend": {"displayMode": "list", "placement": "bottom"}},
+        },
+        {
+            "id": 12, "title": "Channel Load",
+            "description": "Channel utilization per AP radio as reported by usteer. High load may trigger client steering.",
+            "type": "timeseries",
+            "gridPos": {"h": 8, "w": 12, "x": 0, "y": (y := y + 10)},
+            "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+            "targets": [{"refId": "A", "legendFormat": "{{ap}}",
+                         "expr": f'max by (ap)(wifi_usteer_load{{instance=~"{instance_re}"}})'  }],
+            "fieldConfig": {"defaults": {"unit": "percent", "min": 0, "custom": {
+                "drawStyle": "line", "lineWidth": 2, "fillOpacity": 20}}, "overrides": []},
+            "options": {"tooltip": {"mode": "multi"},
+                        "legend": {"displayMode": "list", "placement": "bottom"}},
+        },
+        {
+            "id": 13, "title": "Roam Events (usteer)",
+            "description": "Roams initiated by usteer per AP. Source = steered away, Target = steered to. Counters reset on service restart.",
+            "type": "timeseries",
+            "gridPos": {"h": 8, "w": 12, "x": 12, "y": y},
+            "datasource": {"type": "prometheus", "uid": "${DS_PROMETHEUS}"},
+            "targets": [
+                {"refId": "A", "legendFormat": "{{ap}} source",
+                 "expr": f'max by (ap)(wifi_usteer_roam_events_source{{instance=~"{instance_re}"}})'  },
+                {"refId": "B", "legendFormat": "{{ap}} target",
+                 "expr": f'max by (ap)(wifi_usteer_roam_events_target{{instance=~"{instance_re}"}})'  },
+            ],
+            "fieldConfig": {"defaults": {"unit": "short", "custom": {
+                "drawStyle": "line", "lineWidth": 2, "fillOpacity": 10}}, "overrides": []},
+            "options": {"tooltip": {"mode": "multi"},
+                        "legend": {"displayMode": "list", "placement": "bottom"}},
+        },
         # === MIDDLE: events + clients side by side ===
         {
             "id": 3, "title": "Connect/Disconnect Events",
             "description": "Hostapd connect/disconnect events with resolved station names.",
             "type": "logs",
-            "gridPos": {"h": 12, "w": 12, "x": 0, "y": (y := y + 14)},
+            "gridPos": {"h": 12, "w": 12, "x": 0, "y": (y := y + 8)},
             "datasource": {"type": "victoriametrics-logs-datasource", "uid": "${DS_VICTORIALOGS}"},
             "targets": [
                 {"refId": "A", "expr": (
