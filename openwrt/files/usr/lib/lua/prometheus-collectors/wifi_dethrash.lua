@@ -4,6 +4,20 @@
 
 local ubus = require "ubus"
 local iwinfo = require "iwinfo"
+local nixio = require "nixio"
+
+-- Module-level reverse DNS cache (resolved once, persists across scrapes)
+local _rdns_cache = {}
+local function resolve_ip(ip)
+  if _rdns_cache[ip] ~= nil then return _rdns_cache[ip] end
+  local ok, name = pcall(nixio.getnameinfo, ip)
+  if ok and name then
+    _rdns_cache[ip] = name:match("^([%w%-]+)") or ip  -- strip domain
+  else
+    _rdns_cache[ip] = ip
+  end
+  return _rdns_cache[ip]
+end
 
 local function scrape()
   -- Phase 1: Radio metrics from iwinfo
@@ -115,7 +129,7 @@ local function scrape()
       for node_key, info in pairs(remote_info) do
         local ssid = info.ssid or ""
         local ip = node_key:match("^(.+)#") or node_key
-        node_map[node_key] = {ssid = ssid, ap = ip .. "/" .. ssid}
+        node_map[node_key] = {ssid = ssid, ap = resolve_ip(ip) .. "/" .. ssid}
       end
     end
 
