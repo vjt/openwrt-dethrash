@@ -23,10 +23,6 @@ def test_load_full_config(tmp_path: Path) -> None:
         'grafana_url = "https://grafana.example.com"\n'
         'grafana_api_key = "glsa_test"\n'
         'mesh_ssids = ["Mercury", "Saturn"]\n'
-        "\n"
-        "[aps]\n"
-        'golem = "Ground floor / Living room"\n'
-        'albert = "First floor / Bedroom"\n'
     )
     cfg = load_config(p)
     assert cfg.vm_url == "https://vm.example.com"
@@ -34,10 +30,6 @@ def test_load_full_config(tmp_path: Path) -> None:
     assert cfg.grafana_url == "https://grafana.example.com"
     assert cfg.grafana_api_key == "glsa_test"
     assert cfg.mesh_ssids == ["Mercury", "Saturn"]
-    assert cfg.aps == {
-        "golem": "Ground floor / Living room",
-        "albert": "First floor / Bedroom",
-    }
 
 
 def test_load_partial_config(tmp_path: Path) -> None:
@@ -47,18 +39,6 @@ def test_load_partial_config(tmp_path: Path) -> None:
     assert cfg.vm_url == "https://vm.example.com"
     assert cfg.vl_url == ""
     assert cfg.mesh_ssids == []
-    assert cfg.aps == {}
-
-
-def test_load_only_aps(tmp_path: Path) -> None:
-    p = tmp_path / "aps.toml"
-    p.write_text(
-        "[aps]\n"
-        'pingu = "First floor / Office"\n'
-    )
-    cfg = load_config(p)
-    assert cfg.vm_url == ""
-    assert cfg.aps == {"pingu": "First floor / Office"}
 
 
 def test_config_is_frozen(tmp_path: Path) -> None:

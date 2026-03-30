@@ -139,7 +139,7 @@ def main(config_path, vm_url, vl_url, grafana_url, grafana_api_key,
             click.echo(f"Found {len(aps)} APs: {', '.join(a.hostname for a in aps)}")
 
             if generate_dashboard:
-                dashboard_json = generate_dashboard(aps, ap_locations=cfg.aps)
+                dashboard_json = generate_dashboard(aps)
                 with open(generate_dashboard, "w") as f:
                     f.write(dashboard_json)
                 click.echo(f"Dashboard written to {generate_dashboard}")
@@ -148,10 +148,10 @@ def main(config_path, vm_url, vl_url, grafana_url, grafana_api_key,
             if push_dashboard:
                 dash_mac_names: dict[str, str] = {}
                 if effective_vl_url:
-                    click.echo("Resolving MAC addresses ...")
+                    click.echo("Resolving WiFi stations ...")
                     with VictoriaLogsClient(effective_vl_url) as vl:
-                        dash_mac_names = vl.fetch_mac_names()
-                    click.echo(f"Resolved {len(dash_mac_names)} MAC names")
+                        dash_mac_names, _ = vl.fetch_wifi_stations()
+                    click.echo(f"Resolved {len(dash_mac_names)} MAC→hostname mappings")
 
                 with GrafanaClient(effective_grafana_url, effective_grafana_api_key) as gf:
                     datasources = gf.discover_datasources()
@@ -159,8 +159,7 @@ def main(config_path, vm_url, vl_url, grafana_url, grafana_api_key,
                     vl_uid = gf.find_datasource_uid(
                         datasources, "victoriametrics-logs-datasource")
                     dashboard = generate_dashboard_api(
-                        aps, prom_uid, vl_uid,
-                        ap_locations=cfg.aps, mac_names=dash_mac_names)
+                        aps, prom_uid, vl_uid, mac_names=dash_mac_names)
                     url = gf.push_dashboard(dashboard)
                 click.echo(f"Dashboard pushed: {effective_grafana_url}{url}")
                 return
@@ -180,8 +179,8 @@ def main(config_path, vm_url, vl_url, grafana_url, grafana_api_key,
             click.echo("Fetching hostapd events ...")
             events = vl.fetch_events(start, end, macs=macs)
 
-            click.echo("Resolving MAC addresses ...")
-            mac_names = vl.fetch_mac_names()
+            click.echo("Resolving WiFi stations ...")
+            mac_names, _ = vl.fetch_wifi_stations()
     except (httpx.HTTPStatusError, httpx.ConnectError, httpx.TimeoutException,
             ssl.SSLError) as exc:
         _handle_error(f"VictoriaLogs ({effective_vl_url})", exc)

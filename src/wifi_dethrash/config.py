@@ -12,7 +12,6 @@ class Config:
     grafana_url: str = ""
     grafana_api_key: str = ""
     mesh_ssids: list[str] = field(default_factory=list)
-    aps: dict[str, str] = field(default_factory=dict)
 
 
 def load_config(path: Path = CONFIG_PATH) -> Config:
@@ -29,5 +28,4 @@ def load_config(path: Path = CONFIG_PATH) -> Config:
         grafana_url=data.get("grafana_url", ""),
         grafana_api_key=data.get("grafana_api_key", ""),
         mesh_ssids=data.get("mesh_ssids", []),
-        aps=data.get("aps", {}),
     )
