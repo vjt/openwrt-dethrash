@@ -191,6 +191,25 @@ func processLine(line string, r *resolver) string {
 	return line + fmt.Sprintf(",station=%q", name)
 }
 
+// metricsHandler serves Prometheus metrics with MAC→hostname mapping.
+func metricsHandler(r *resolver) http.HandlerFunc {
+	return func(w http.ResponseWriter, req *http.Request) {
+		r.mu.RLock()
+		defer r.mu.RUnlock()
+
+		w.Header().Set("Content-Type", "text/plain; version=0.0.4")
+		fmt.Fprintln(w, "# HELP wifi_station_name MAC to hostname mapping from DHCP reservations")
+		fmt.Fprintln(w, "# TYPE wifi_station_name gauge")
+		for mac, name := range r.names {
+			// MAC in uppercase colon-separated to match Prometheus labels
+			upper := strings.ToUpper(mac)
+			fmt.Fprintf(w, "wifi_station_name{mac=%q,station=%q} 1\n", upper, name)
+		}
+	}
+}
+
+var metricsAddr = envOrDefault("METRICS_ADDR", ":9101")
+
 func main() {
 	if technitiumToken == "" {
 		log.Fatal("TECHNITIUM_TOKEN environment variable is required")
@@ -207,6 +226,16 @@ func main() {
 	}
 
 	go r.runRefreshLoop(interval)
+
+	// Serve MAC→hostname mapping as Prometheus metrics
+	go func() {
+		mux := http.NewServeMux()
+		mux.Handle("/metrics", metricsHandler(r))
+		log.Printf("serving metrics on %s/metrics", metricsAddr)
+		if err := http.ListenAndServe(metricsAddr, mux); err != nil {
+			log.Fatalf("metrics server: %v", err)
+		}
+	}()
 
 	scanner := bufio.NewScanner(os.Stdin)
 	// Increase buffer for long lines
