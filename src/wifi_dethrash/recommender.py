@@ -118,9 +118,18 @@ class Recommender:
                     votes[(quieter, p.radio)].append(
                         (weight, -2, f"reduce for {pair_label}"))
             else:
-                # Weak signal: increase the quieter AP for coverage
-                votes[(quieter, p.radio)].append(
-                    (weight, +2, f"increase for {pair_label}"))
+                # Weak signal: increase the AP with lower txpower
+                # (more headroom to grow).  If the "quieter" AP
+                # already has higher txpower, increase the other one
+                # instead — its lower power means more room to extend
+                # coverage into the dead zone.
+                if louder_txp < quieter_txp:
+                    votes[(louder, p.radio)].append(
+                        (weight, +2, f"increase for {pair_label}"))
+                elif quieter_txp < louder_txp:
+                    votes[(quieter, p.radio)].append(
+                        (weight, +2, f"increase for {pair_label}"))
+                # else: txpower equal — genuine coverage gap, no vote
 
         # Consolidate: for each (ap, radio), resolve votes into one delta
         changes: list[TxPowerChange] = []
@@ -187,6 +196,7 @@ class Recommender:
     def usteer_commands(
         self,
         signal_diff_threshold: int,
+        ieee80211v_missing: list[str] | None = None,
     ) -> list[UCICommand]:
         """Generate complete usteer config: signal_diff for steering,
         explicit disables for everything that kicks clients.
@@ -195,11 +205,27 @@ class Recommender:
         causes disconnect storms in weak-coverage areas where clients get
         kicked and can't find a better AP. Explicitly zero them out so
         usteer defaults don't bite.
-        """
-        if signal_diff_threshold <= 0:
-            return []
 
-        return [
+        ieee80211v_missing: APs where 802.11v (BSS Transition Management) is
+        not enabled on at least one interface.  Without 802.11v, usteer cannot
+        send BTM frames to gently steer clients — it can only reject probes or
+        block associations, both of which are blunt instruments.
+        """
+        commands: list[UCICommand] = []
+
+        # 802.11v is prerequisite for gentle usteer steering
+        for ap in ieee80211v_missing or []:
+            commands.append(UCICommand(
+                ap=ap,
+                ssh_prefix=f"ssh root@{ap}",
+                command="uci set wireless.<iface>.ieee80211v=1",
+                reason="Enable BSS Transition Management — required for usteer to send roam hints",
+            ))
+
+        if signal_diff_threshold <= 0:
+            return commands
+
+        commands.extend([
             UCICommand(
                 ap="all",
                 ssh_prefix="ssh root@<ap>",
@@ -236,7 +262,9 @@ class Recommender:
                 command="uci set usteer.@usteer[0].load_kick_enabled=0",
                 reason="Disable — force-disconnects clients under load",
             ),
-        ]
+        ])
+
+        return commands
 
     def _analyze_pairs(
         self,

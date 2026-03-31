@@ -39,8 +39,8 @@ class TestTxPowerPlan:
         assert c.ap == "golem"
         assert c.proposed == 21  # 23 - 2
 
-    def test_increases_quieter_ap_when_weak(self):
-        """When RSSI is weak, increase the quieter AP for coverage."""
+    def test_increases_lower_txpower_ap_when_weak(self):
+        """When RSSI is weak, increase the AP with lower txpower (more headroom)."""
         plan = Recommender(rssi_floor=-75).plan(
             [_thrash(("albert", "pingu"), 30)],
             [_overlap(("albert", "pingu"), -84, -83)],
@@ -49,7 +49,29 @@ class TestTxPowerPlan:
         assert len(plan.changes) == 1
         c = plan.changes[0]
         assert c.ap == "albert"
-        assert c.proposed == 21  # 19 + 2
+        assert c.proposed == 21  # 19 + 2 (albert has lower txpower)
+
+    def test_does_not_increase_high_txpower_ap_when_weak(self):
+        """When RSSI is weak, don't increase the AP that already has higher txpower."""
+        plan = Recommender(rssi_floor=-75).plan(
+            [_thrash(("albert", "pingu"), 30)],
+            [_overlap(("albert", "pingu"), -87, -85)],
+            txpower=[_txp("albert", 21), _txp("pingu", 20)],
+        )
+        assert len(plan.changes) == 1
+        c = plan.changes[0]
+        # albert is RSSI-quieter but has higher txpower — increase pingu instead
+        assert c.ap == "pingu"
+        assert c.proposed == 22  # 20 + 2
+
+    def test_no_change_when_weak_and_equal_txpower(self):
+        """When RSSI is weak and both APs have equal txpower, it's a coverage gap."""
+        plan = Recommender(rssi_floor=-75).plan(
+            [_thrash(("albert", "pingu"), 30)],
+            [_overlap(("albert", "pingu"), -84, -83)],
+            txpower=[_txp("albert", 20), _txp("pingu", 20)],
+        )
+        assert len(plan.changes) == 0
 
     def test_consolidates_conflicting_votes(self):
         """When an AP gets increase and reduce votes, higher severity wins."""
@@ -126,6 +148,27 @@ class TestUsteerRecommendation:
     def test_no_commands_when_zero(self):
         rec = Recommender()
         assert rec.usteer_commands(0) == []
+
+    def test_ieee80211v_missing_generates_commands(self):
+        """Should recommend enabling 802.11v on APs where it's missing."""
+        rec = Recommender()
+        commands = rec.usteer_commands(9, ieee80211v_missing=["parrot"])
+        v_cmds = [c for c in commands if "ieee80211v" in c.command]
+        assert len(v_cmds) == 1
+        assert v_cmds[0].ap == "parrot"
+
+    def test_ieee80211v_commands_before_usteer(self):
+        """802.11v enable commands should come before usteer config."""
+        rec = Recommender()
+        commands = rec.usteer_commands(9, ieee80211v_missing=["parrot"])
+        assert "ieee80211v" in commands[0].command
+
+    def test_no_ieee80211v_when_all_enabled(self):
+        """No 802.11v commands when all APs have it enabled."""
+        rec = Recommender()
+        commands = rec.usteer_commands(9, ieee80211v_missing=[])
+        v_cmds = [c for c in commands if "ieee80211v" in c.command]
+        assert len(v_cmds) == 0
 
 
 class TestUCICommand:

@@ -1,7 +1,10 @@
+import logging
 from dataclasses import dataclass
 from datetime import datetime
 
 import httpx
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -165,8 +168,8 @@ class VictoriaMetricsClient:
                 ap = self._hostname_from_label(m.get(self._host_label, ""))
                 radio = m.get("device", "")
                 configured[(ap, radio)] = int(float(series["value"][1]))
-        except Exception:
-            pass  # configured txpower is optional
+        except httpx.HTTPError as exc:
+            logger.debug("configured txpower unavailable: %s", exc)
 
         # Fetch channel/frequency from wifi_radio_channel and wifi_radio_frequency_mhz
         channels: dict[tuple[str, str], int] = {}
@@ -186,8 +189,8 @@ class VictoriaMetricsClient:
                     ap = self._hostname_from_label(m.get(self._host_label, ""))
                     radio = m.get("device", "")
                     target_dict[(ap, radio)] = int(float(series["value"][1]))
-            except Exception:
-                pass
+            except httpx.HTTPError as exc:
+                logger.debug("%s unavailable: %s", metric_name, exc)
 
         readings = []
         for series in resp.json()["data"]["result"]:
@@ -208,3 +211,28 @@ class VictoriaMetricsClient:
             ))
 
         return readings
+
+    def fetch_ieee80211v_missing(self) -> list[str]:
+        """Return AP hostnames where 802.11v is not enabled on all interfaces.
+
+        Without 802.11v, usteer cannot send BSS Transition Management frames
+        to gently steer clients.  Returns empty list if metric is unavailable.
+        """
+        try:
+            resp = self._client.get(
+                f"{self._base_url}/api/v1/query",
+                params={"query": "wifi_iface_ieee80211v_enabled"},
+            )
+            resp.raise_for_status()
+        except httpx.HTTPError as exc:
+            logger.debug("ieee80211v metric unavailable: %s", exc)
+            return []
+
+        ap_has_disabled: set[str] = set()
+        for series in resp.json()["data"]["result"]:
+            m = series["metric"]
+            ap = self._hostname_from_label(m.get(self._host_label, ""))
+            if int(float(series["value"][1])) == 0:
+                ap_has_disabled.add(ap)
+
+        return sorted(ap_has_disabled)

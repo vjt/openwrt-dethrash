@@ -119,10 +119,7 @@ def main(config_path, vm_url, vl_url, grafana_url, grafana_api_key,
             aps = vm.discover_aps()
 
             click.echo("Fetching txpower data ...")
-            try:
-                txpower = vm.fetch_txpower()
-            except Exception:
-                txpower = None
+            txpower = vm.fetch_txpower()
 
             # SSID-based AP filtering
             if effective_mesh_ssids and txpower:
@@ -162,6 +159,8 @@ def main(config_path, vm_url, vl_url, grafana_url, grafana_api_key,
             click.echo("Fetching noise floor data ...")
             noise = vm.fetch_noise(start, end)
 
+            ieee80211v_missing = vm.fetch_ieee80211v_missing()
+
     except (httpx.HTTPStatusError, httpx.ConnectError, httpx.TimeoutException,
             ssl.SSLError) as exc:
         _handle_error(f"VictoriaMetrics ({effective_vm_url})", exc)
@@ -186,12 +185,15 @@ def main(config_path, vm_url, vl_url, grafana_url, grafana_api_key,
 
     rec = Recommender(overlap_threshold=overlap_threshold, rssi_floor=rssi_floor)
     txpower_plan = rec.plan(thrash, overlap, txpower=txpower)
-    usteer_commands = rec.usteer_commands(txpower_plan.signal_diff_threshold)
+    usteer_cmds = rec.usteer_commands(
+        txpower_plan.signal_diff_threshold,
+        ieee80211v_missing=ieee80211v_missing,
+    )
 
     click.echo("")
     click.echo(render_report(
         thrash=thrash, overlap=overlap, weak=weak,
-        plan=txpower_plan, usteer_commands=usteer_commands,
+        plan=txpower_plan, usteer_commands=usteer_cmds,
         txpower=txpower, noise=noise,
         mac_names=mac_names,
     ))
