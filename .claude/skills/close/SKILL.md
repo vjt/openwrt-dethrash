@@ -32,7 +32,17 @@ Review what happened this session and update memory files:
 Focus on what's useful for next time. Don't save things derivable
 from code or git history.
 
-### 3. Check docs freshness
+### 3. Update changelog
+
+Append this session's changes to the `## Unreleased` section at the top
+of `CHANGELOG.md`. Follow [Keep a Changelog](https://keepachangelog.com/)
+with sections: `Added`, `Changed`, `Fixed`, `Removed` (only include
+sections that apply).
+
+If no `## Unreleased` section exists, create one below the `# Changelog`
+header. Write concise, user-facing descriptions — not commit messages.
+
+### 4. Check docs freshness
 
 Scan `docs/` and `CLAUDE.md` for references to things that changed
 this session (renamed functions, changed field names, new config
@@ -41,7 +51,7 @@ options, updated architecture). Fix any stale references.
 Only touch docs that are actually wrong. Don't rewrite for cosmetic
 reasons.
 
-### 4. Deploy dashboard
+### 5. Deploy dashboard
 
 If dashboard code changed this session and wasn't already pushed:
 ```bash
@@ -51,7 +61,7 @@ If dashboard code changed this session and wasn't already pushed:
 If station-resolver changed, remind the user to rebuild and deploy
 (see memory for deploy procedure).
 
-### 5. Report
+### 6. Report
 
 Tell the human:
 - Commits pushed (count + range)

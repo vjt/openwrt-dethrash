@@ -1,5 +1,13 @@
 # Changelog
 
+## Unreleased
+
+### Fixed
+- **Duplicate timeline bars** — `_with_station()` used `group_left(station, ip)`
+  which produced duplicate series when old (no `ip` label) and new gauge series
+  coexisted in VictoriaMetrics. Changed to `group_left(station)` with
+  `max by (mac, station)` aggregation.
+
 ## 0.4.0 — 2026-04-10
 
 ### Added
@@ -14,8 +22,8 @@
   names. No more hardcoded `fields.station`.
 - **`/metrics` endpoint: `ip` label** — `wifi_station_name{mac,station,ip} 1`
   gauge now includes the station's reserved DHCP IP address.
-- **Dashboard: `group_left(station, ip)`** — all panels using `_with_station()`
-  now pull both hostname and IP labels from the join.
+- **Dashboard: `group_left` with IP** — `_with_station()` updated to join
+  both hostname and IP labels from station-resolver gauge.
 - **`build.sh`** — Docker-based build/test script for station-resolver. No
   local Go toolchain required (`golang:1.23-alpine` in Docker).
 

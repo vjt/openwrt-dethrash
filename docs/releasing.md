@@ -1,19 +1,31 @@
 # Releasing
 
+Use `/release` to cut a release interactively, or follow the manual
+steps below.
+
 ## Version Locations
 
-Update all three before committing:
+Update all before committing:
 
 | File | Field |
 |------|-------|
 | `pyproject.toml` | `version = "X.Y.Z"` |
 | `openwrt/Makefile` | `PKG_VERSION:=X.Y.Z` |
-| `CHANGELOG.md` | `## X.Y.Z — YYYY-MM-DD` |
+| `CHANGELOG.md` | `## X.Y.Z — YYYY-MM-DD` (replace `## Unreleased`) |
 
-## Steps
+## Changelog Workflow
+
+Changes accumulate under `## Unreleased` at the top of `CHANGELOG.md`
+(added by `/close` at session end). At release time, the `## Unreleased`
+header is replaced with `## X.Y.Z — YYYY-MM-DD`.
+
+Follow [Keep a Changelog](https://keepachangelog.com/) with sections:
+`Added`, `Changed`, `Fixed`, `Removed`.
+
+## Manual Steps
 
 ```bash
-# 1. Update CHANGELOG.md with release notes
+# 1. Replace ## Unreleased with ## X.Y.Z — YYYY-MM-DD in CHANGELOG.md
 # 2. Bump version in pyproject.toml and openwrt/Makefile
 # 3. Commit and tag
 git add CHANGELOG.md pyproject.toml openwrt/Makefile
@@ -24,10 +36,5 @@ git push && git push --tags
 # 4. Create GitHub release from changelog
 gh release create vX.Y.Z \
   --title "vX.Y.Z — Short description" \
-  --notes "$(cat release-notes)"
+  --notes "release notes from CHANGELOG.md"
 ```
-
-## Changelog Format
-
-Follow [Keep a Changelog](https://keepachangelog.com/) with sections:
-`Added`, `Changed`, `Fixed`, `Removed`.
