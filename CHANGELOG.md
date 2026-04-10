@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Added
+- **`/start`, `/close`, `/release` skills** — session management and release
+  automation via Claude Code skills in `.claude/skills/`.
+- **Unreleased changelog workflow** — `/close` appends to `## Unreleased`,
+  `/release` finalizes it into a versioned section.
+
 ### Fixed
 - **Duplicate timeline bars** — `_with_station()` used `group_left(station, ip)`
   which produced duplicate series when old (no `ip` label) and new gauge series
