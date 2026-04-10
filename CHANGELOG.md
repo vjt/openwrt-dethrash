@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.3.1 — 2026-04-10
+
+### Added
+- **Station IP enrichment** — station-resolver now emits IP address alongside
+  hostname. New `STATION_IP_FIELD` env var (default `station_ip`, set to
+  `client_ip` in SIEM stack). Technitium DHCP `address` field parsed from
+  reserved leases.
+- **`/metrics` endpoint: `ip` label** — `wifi_station_name{mac,station,ip} 1`
+  gauge now includes the station's reserved DHCP IP address.
+- **Dashboard: `group_left(station, ip)`** — all panels using `_with_station()`
+  now pull both hostname and IP labels from the join.
+- **`build.sh`** — Docker-based build/test script for station-resolver. No
+  local Go toolchain required (`golang:1.23-alpine` in Docker).
+
+### Changed
+- Station-resolver `lookup()` returns `(name, ip)` tuple instead of just name.
+- `processLine()` injects both hostname and IP fields into influx line protocol.
+  IP field omitted gracefully when not available for a MAC.
+
 ## 0.3.0 — 2026-03-30
 
 ### Added
