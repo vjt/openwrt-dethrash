@@ -97,15 +97,19 @@ def _build_clients_panel(
 
 
 def _with_station(expr: str) -> str:
-    """Add station name and IP via group_left join, filter by $station variable.
+    """Add station name via group_left join, filter by $station variable.
 
     Joins with wifi_station_name_gauge (from station-resolver) to add
-    the 'station' and 'ip' labels, then filters by the dashboard's
-    $station variable. Fully dynamic — no baked-in mapping needed.
+    the 'station' label, then filters by the dashboard's $station
+    variable. Fully dynamic — no baked-in mapping needed.
+
+    The gauge is aggregated by (mac, station) to collapse series that
+    differ only in labels added later (e.g. 'ip'), which would otherwise
+    cause duplicate matches and duplicated timeline bars.
     """
     return (
         f'label_match('
-        f'({expr}) * on(mac) group_left(station, ip) wifi_station_name_gauge'
+        f'({expr}) * on(mac) group_left(station) max by (mac, station)(wifi_station_name_gauge)'
         f', "station", "$station")'
     )
 
