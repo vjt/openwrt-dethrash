@@ -54,6 +54,10 @@ func TestProcessLine(t *testing.T) {
 			"6c:3a:ff:3d:ea:f0": "sara-iphone",
 			"e0:85:4d:b3:bc:c0": "tv",
 		},
+		ips: map[string]string{
+			"6c:3a:ff:3d:ea:f0": "192.168.42.100",
+			"e0:85:4d:b3:bc:c0": "192.168.42.101",
+		},
 	}
 
 	tests := []struct {
@@ -62,14 +66,14 @@ func TestProcessLine(t *testing.T) {
 		want string
 	}{
 		{
-			name: "enriches connected event",
+			name: "enriches connected event with hostname and IP",
 			line: `syslog,appname=hostapd,hostname=golem message="phy1-ap0: AP-STA-CONNECTED 6c:3a:ff:3d:ea:f0 auth_alg=ft" 1700000000000000000`,
-			want: `syslog,appname=hostapd,hostname=golem message="phy1-ap0: AP-STA-CONNECTED 6c:3a:ff:3d:ea:f0 auth_alg=ft",station="sara-iphone" 1700000000000000000`,
+			want: `syslog,appname=hostapd,hostname=golem message="phy1-ap0: AP-STA-CONNECTED 6c:3a:ff:3d:ea:f0 auth_alg=ft",station="sara-iphone",station_ip="192.168.42.100" 1700000000000000000`,
 		},
 		{
-			name: "enriches uppercase MAC",
+			name: "enriches uppercase MAC with hostname and IP",
 			line: `syslog,appname=hostapd,hostname=albert message="phy1-ap0: AP-STA-CONNECTED E0:85:4D:B3:BC:C0 auth_alg=open" 1700000000000000000`,
-			want: `syslog,appname=hostapd,hostname=albert message="phy1-ap0: AP-STA-CONNECTED E0:85:4D:B3:BC:C0 auth_alg=open",station="tv" 1700000000000000000`,
+			want: `syslog,appname=hostapd,hostname=albert message="phy1-ap0: AP-STA-CONNECTED E0:85:4D:B3:BC:C0 auth_alg=open",station="tv",station_ip="192.168.42.101" 1700000000000000000`,
 		},
 		{
 			name: "passes through unknown MAC",
@@ -93,33 +97,58 @@ func TestProcessLine(t *testing.T) {
 	}
 }
 
+func TestProcessLineNoIP(t *testing.T) {
+	// Station with hostname but no IP — should only emit hostname field
+	r := &resolver{
+		names: map[string]string{
+			"6c:3a:ff:3d:ea:f0": "sara-iphone",
+		},
+		ips: map[string]string{},
+	}
+
+	line := `syslog,appname=hostapd,hostname=golem message="phy1-ap0: AP-STA-CONNECTED 6c:3a:ff:3d:ea:f0 auth_alg=ft" 1700000000000000000`
+	got := processLine(line, r)
+	want := `syslog,appname=hostapd,hostname=golem message="phy1-ap0: AP-STA-CONNECTED 6c:3a:ff:3d:ea:f0 auth_alg=ft",station="sara-iphone" 1700000000000000000`
+	if got != want {
+		t.Errorf("processLine() no IP:\n  got  %q\n  want %q", got, want)
+	}
+}
+
 func TestStationFieldOverride(t *testing.T) {
 	r := &resolver{
 		names: map[string]string{
 			"6c:3a:ff:3d:ea:f0": "sara-iphone",
 		},
+		ips: map[string]string{
+			"6c:3a:ff:3d:ea:f0": "192.168.42.100",
+		},
 	}
 
 	line := `syslog,appname=hostapd,hostname=golem message="phy1-ap0: AP-STA-CONNECTED 6c:3a:ff:3d:ea:f0 auth_alg=ft" 1700000000000000000`
 
-	// Default: field is "station"
+	// Default: fields are "station" and "station_ip"
 	fieldName = "station"
+	ipFieldName = "station_ip"
 	got := processLine(line, r)
-	want := `syslog,appname=hostapd,hostname=golem message="phy1-ap0: AP-STA-CONNECTED 6c:3a:ff:3d:ea:f0 auth_alg=ft",station="sara-iphone" 1700000000000000000`
+	want := `syslog,appname=hostapd,hostname=golem message="phy1-ap0: AP-STA-CONNECTED 6c:3a:ff:3d:ea:f0 auth_alg=ft",station="sara-iphone",station_ip="192.168.42.100" 1700000000000000000`
 	if got != want {
-		t.Errorf("default fieldName:\n  got  %q\n  want %q", got, want)
+		t.Errorf("default fieldNames:\n  got  %q\n  want %q", got, want)
 	}
 
-	// Override via STATION_FIELD
+	// Override both fields
 	os.Setenv("STATION_FIELD", "client_host")
+	os.Setenv("STATION_IP_FIELD", "client_ip")
 	fieldName = envOrDefault("STATION_FIELD", "station")
+	ipFieldName = envOrDefault("STATION_IP_FIELD", "station_ip")
 	got = processLine(line, r)
-	want = `syslog,appname=hostapd,hostname=golem message="phy1-ap0: AP-STA-CONNECTED 6c:3a:ff:3d:ea:f0 auth_alg=ft",client_host="sara-iphone" 1700000000000000000`
+	want = `syslog,appname=hostapd,hostname=golem message="phy1-ap0: AP-STA-CONNECTED 6c:3a:ff:3d:ea:f0 auth_alg=ft",client_host="sara-iphone",client_ip="192.168.42.100" 1700000000000000000`
 	if got != want {
-		t.Errorf("STATION_FIELD=client_host:\n  got  %q\n  want %q", got, want)
+		t.Errorf("STATION_FIELD=client_host, STATION_IP_FIELD=client_ip:\n  got  %q\n  want %q", got, want)
 	}
 
 	// Cleanup
 	os.Unsetenv("STATION_FIELD")
+	os.Unsetenv("STATION_IP_FIELD")
 	fieldName = "station"
+	ipFieldName = "station_ip"
 }

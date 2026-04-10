@@ -101,9 +101,11 @@ tests/
 ## Commands
 
 ```bash
-.venv/bin/pytest -v              # run tests (93 tests, ~0.8s)
-.venv/bin/pyright src/ tests/    # type check (zero errors)
-.venv/bin/wifi-dethrash --help   # CLI help
+.venv/bin/pytest -v                          # run Python tests (93 tests, ~0.8s)
+.venv/bin/pyright src/ tests/                # type check (zero errors)
+.venv/bin/wifi-dethrash --help               # CLI help
+cmd/station-resolver/build.sh test           # Go tests (runs in Docker, no local Go)
+cmd/station-resolver/build.sh build          # build binary (linux/arm64, via Docker)
 ```
 
 ## Key design decisions
@@ -152,16 +154,19 @@ Deployed on each AP as a prometheus-node-exporter-lua collector. Exports:
 
 Go binary with dual role in the Telegraf pipeline:
 - **execd processor**: reads influx line protocol on stdin, enriches hostapd
-  AP-STA-CONNECTED/DISCONNECTED lines with `station=<hostname>` field, writes
-  to stdout. VictoriaLogs stores these as `fields.station`.
-- **/metrics endpoint**: serves `wifi_station_name{mac, station} 1` gauge.
+  AP-STA-CONNECTED/DISCONNECTED lines with `station=<hostname>` and
+  `station_ip=<ip>` fields, writes to stdout. VictoriaLogs stores these
+  as `fields.station` and `fields.station_ip`.
+- **/metrics endpoint**: serves `wifi_station_name{mac, station, ip} 1` gauge.
   Telegraf scrapes this via `inputs.prometheus` and forwards to VictoriaMetrics
   (stored as `wifi_station_name_gauge` after Telegraf type suffix).
 
-MAC→hostname mapping fetched from Technitium DHCP reserved leases API,
-refreshed every minute. Only reserved leases — unknown MACs get no station
-field. Config via env vars: `TECHNITIUM_TOKEN`, `TECHNITIUM_URL`,
-`DHCP_SCOPE`, `REFRESH_INTERVAL`, `METRICS_ADDR`.
+MAC→hostname and MAC→IP mappings fetched from Technitium DHCP reserved
+leases API, refreshed every minute. Only reserved leases — unknown MACs
+get no station/IP field. Config via env vars: `TECHNITIUM_TOKEN`,
+`TECHNITIUM_URL`, `DHCP_SCOPE`, `REFRESH_INTERVAL`, `STATION_FIELD`
+(default `station`), `STATION_IP_FIELD` (default `station_ip`),
+`METRICS_ADDR`. No local Go required — use `build.sh` (runs in Docker).
 
 ## OpenWrt environment
 
