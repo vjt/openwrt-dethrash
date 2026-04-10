@@ -37,6 +37,10 @@ openwrt/
 tests/
   conftest.py         # respx mock fixture
   test_*.py           # One test file per module (93 tests)
+docs/
+  grafana-vl-plugin.md   # VL datasource queryTypes, variable patterns, known issues
+  releasing.md           # Version bump + GitHub release procedure
+  technitium-dhcp-api.md # DHCP reserved lease API fields and design decisions
 ```
 
 ## Engineering Standards
@@ -135,9 +139,10 @@ cmd/station-resolver/build.sh build          # build binary (linux/arm64, via Do
   `wifi_usteer_hearing_signal_dbm`, `wifi_usteer_hearing_connected`,
   `wifi_usteer_roam_events_source`, `wifi_usteer_roam_events_target`,
   `wifi_usteer_load`, `wifi_usteer_associated_clients`,
-  `wifi_station_name_gauge` (from station-resolver, labels: `mac`, `station`)
+  `wifi_station_name_gauge` (from station-resolver, labels: `mac`, `station`, `ip`)
 - VictoriaLogs: hostapd `AP-STA-CONNECTED` / `AP-STA-DISCONNECTED` events
-  (enriched with `fields.station` by station-resolver)
+  (enriched with station hostname and IP by station-resolver; field names
+  configurable via `station_field`/`station_ip_field` in config.toml)
 - Instance label format: `hostname:9100` (configurable via --host-label)
 
 ## Lua collector (openwrt/wifi_dethrash.lua)
@@ -176,10 +181,12 @@ get no station/IP field. Config via env vars: `TECHNITIUM_TOKEN`,
 
 ## Gotchas learned during development
 
-- VictoriaLogs datasource plugin ID is `victoriametrics-logs-datasource` (not `victorialogs-datasource`)
 - Grafana 12 file-import rejects JSON wrapped in `{"dashboard": {...}}` — use bare JSON
 - Grafana 12 API push requires `{"dashboard": {...}, "overwrite": true}` wrapper (opposite of file-import)
 - Grafana 12 requires schemaVersion >= 39, panel `id` fields, and `refId` on targets
+- VictoriaLogs plugin quirks — see [docs/grafana-vl-plugin.md](docs/grafana-vl-plugin.md)
+- Technitium DHCP API fields — see [docs/technitium-dhcp-api.md](docs/technitium-dhcp-api.md)
 - `--vl-url` is optional for `--generate-dashboard` and `--push-dashboard` (only needs VM to discover APs; push also needs Grafana for datasource UIDs)
 - txpower fetch uses instant query (`/api/v1/query`), not range query
 - configured_txpower, channel, frequency are optional — graceful degradation via try/except
+- Releasing: version locations and GitHub release process in [docs/releasing.md](docs/releasing.md)
