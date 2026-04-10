@@ -1,8 +1,9 @@
 // station-resolver is a Telegraf execd processor that enriches hostapd
 // syslog events with station hostnames from Technitium DHCP reservations.
 //
-// It reads influx line protocol on stdin, adds a "station=<hostname>" field
-// to hostapd AP-STA-CONNECTED/DISCONNECTED metrics, and writes the result
+// It reads influx line protocol on stdin, adds a "<field>=<hostname>" field
+// (default "station", configurable via STATION_FIELD env var) to hostapd
+// AP-STA-CONNECTED/DISCONNECTED metrics, and writes the result
 // to stdout.
 //
 // MAC→hostname mapping is fetched from the Technitium DHCP API on startup
@@ -29,6 +30,7 @@ var (
 	technitiumToken = envOrDefault("TECHNITIUM_TOKEN", "")
 	dhcpScope       = envOrDefault("DHCP_SCOPE", "Default")
 	refreshInterval = envOrDefault("REFRESH_INTERVAL", "1m")
+	fieldName       = envOrDefault("STATION_FIELD", "station")
 )
 
 func envOrDefault(key, def string) string {
@@ -161,7 +163,7 @@ func processLine(line string, r *resolver) string {
 
 	// Influx line protocol: measurement,tags fields timestamp
 	// The "message" field contains the syslog message.
-	// We need to add station="hostname" to the fields section.
+	// We need to add <fieldName>="hostname" to the fields section.
 	//
 	// Find the field set boundary: first space after tags (tags contain no spaces
 	// unless escaped, but syslog measurement has no tags with spaces).
@@ -183,12 +185,12 @@ func processLine(line string, r *resolver) string {
 	}
 
 	if isTimestamp {
-		// Insert station field before timestamp
-		return line[:lastSpace] + fmt.Sprintf(",station=%q", name) + line[lastSpace:]
+		// Insert field before timestamp
+		return line[:lastSpace] + fmt.Sprintf(",%s=%q", fieldName, name) + line[lastSpace:]
 	}
 
 	// No timestamp — append field at the end
-	return line + fmt.Sprintf(",station=%q", name)
+	return line + fmt.Sprintf(",%s=%q", fieldName, name)
 }
 
 // metricsHandler serves Prometheus metrics with MAC→hostname mapping.
