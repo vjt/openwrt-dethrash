@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.3.1 — 2026-04-10
+## 0.4.0 — 2026-04-10
 
 ### Added
 - **Station IP enrichment** — station-resolver now emits IP address alongside
