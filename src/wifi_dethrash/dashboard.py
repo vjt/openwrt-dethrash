@@ -119,6 +119,7 @@ _AP_COLORS = [
 
 def _build_panels(
     aps: list[APInfo],
+    station_field: str = "station",
 ) -> list[dict[str, object]]:
     """Build panel list with datasource placeholders."""
     instance_re = "|".join(a.instance for a in aps)
@@ -239,17 +240,17 @@ def _build_panels(
             "datasource": {"type": "victoriametrics-logs-datasource", "uid": "${DS_VICTORIALOGS}"},
             "targets": [
                 {"refId": "A", "expr": (
-                    'tags.appname:hostapd AND _msg:AP-STA-CONNECTED AND _msg:auth_alg AND fields.station:~"$station"'
-                    ' | extract "AP-STA-CONNECTED <mac> auth_alg=<auth>" from _msg'
-                    ' | format "🟢 <_time> <fields.station> ▸ <tags.hostname> (<auth>) · <mac>" as _msg')},
+                    f'tags.appname:hostapd AND _msg:AP-STA-CONNECTED AND _msg:auth_alg AND fields.{station_field}:~"$station"'
+                    f' | extract "AP-STA-CONNECTED <mac> auth_alg=<auth>" from _msg'
+                    f' | format "🟢 <_time> <fields.{station_field}> ▸ <tags.hostname> (<auth>) · <mac>" as _msg')},
                 {"refId": "B", "expr": (
-                    'tags.appname:hostapd AND _msg:AP-STA-CONNECTED AND NOT _msg:auth_alg AND fields.station:~"$station"'
-                    ' | extract "AP-STA-CONNECTED <mac>" from _msg'
-                    ' | format "🟢 <_time> <fields.station> ▸ <tags.hostname> (open) · <mac>" as _msg')},
+                    f'tags.appname:hostapd AND _msg:AP-STA-CONNECTED AND NOT _msg:auth_alg AND fields.{station_field}:~"$station"'
+                    f' | extract "AP-STA-CONNECTED <mac>" from _msg'
+                    f' | format "🟢 <_time> <fields.{station_field}> ▸ <tags.hostname> (open) · <mac>" as _msg')},
                 {"refId": "C", "expr": (
-                    'tags.appname:hostapd AND _msg:AP-STA-DISCONNECTED AND fields.station:~"$station"'
-                    ' | extract "AP-STA-DISCONNECTED <mac>" from _msg'
-                    ' | format "🔴 <_time> <fields.station> ◂ <tags.hostname> · <mac>" as _msg')},
+                    f'tags.appname:hostapd AND _msg:AP-STA-DISCONNECTED AND fields.{station_field}:~"$station"'
+                    f' | extract "AP-STA-DISCONNECTED <mac>" from _msg'
+                    f' | format "🔴 <_time> <fields.{station_field}> ◂ <tags.hostname> · <mac>" as _msg')},
             ],
             "options": {},
         },
@@ -262,7 +263,7 @@ def _build_panels(
             "gridPos": {"h": 8, "w": 24, "x": 0, "y": (y := y + 12)},
             "datasource": {"type": "victoriametrics-logs-datasource", "uid": "${DS_VICTORIALOGS}"},
             "targets": [{"refId": "A", "queryType": "statsRange", "legendFormat": "{{tags.hostname}}", "expr": (
-                'tags.appname:hostapd AND _msg:AP-STA-CONNECTED AND fields.station:~"$station"'
+                f'tags.appname:hostapd AND _msg:AP-STA-CONNECTED AND fields.{station_field}:~"$station"'
                 ' | stats by (tags.hostname) count() connects')}],
             "fieldConfig": {"defaults": {"unit": "short", "noValue": "0", "custom": {
                 "drawStyle": "line", "lineWidth": 2, "fillOpacity": 20,
@@ -388,14 +389,15 @@ def _build_panels(
     return panels
 
 
-def _station_variables() -> list[dict[str, object]]:
+def _station_variables(station_field: str = "station") -> list[dict[str, object]]:
     """Build station selector variable.
 
     Dynamic query variable using VL field_values endpoint.
     Single variable with allValue=".*" works for both datasources:
-    - Prometheus: label_match(..., "mac", "$station") — regex match
-    - VictoriaLogs: fields.station:~"$station" — LogsQL regex filter
+    - Prometheus: label_match(..., "station", "$station") — regex match
+    - VictoriaLogs: fields.<station_field>:~"$station" — LogsQL regex filter
     """
+    vl_field = f"fields.{station_field}"
     return [
         {
             "name": "station",
@@ -407,8 +409,8 @@ def _station_variables() -> list[dict[str, object]]:
             },
             "query": {
                 "type": "fieldValue",
-                "field": "fields.station",
-                "query": "tags.appname:hostapd AND _msg:AP-STA-CONNECTED AND fields.station:*",
+                "field": vl_field,
+                "query": f"tags.appname:hostapd AND _msg:AP-STA-CONNECTED AND {vl_field}:*",
                 "limit": 500,
             },
             "includeAll": True,
@@ -420,9 +422,9 @@ def _station_variables() -> list[dict[str, object]]:
     ]
 
 
-def _dashboard_shell(panels: list[dict[str, object]]) -> dict[str, object]:
+def _dashboard_shell(panels: list[dict[str, object]], station_field: str = "station") -> dict[str, object]:
     """Common dashboard structure shared by both formats."""
-    variables = _station_variables()
+    variables = _station_variables(station_field)
 
     return {
         "title": "WiFi Mesh Health",
@@ -442,12 +444,13 @@ def _dashboard_shell(panels: list[dict[str, object]]) -> dict[str, object]:
 
 def generate_dashboard(
     aps: list[APInfo],
+    station_field: str = "station",
 ) -> str:
     """Generate Grafana dashboard JSON in file-import format.
 
     Output includes __inputs so the UI prompts for datasource selection.
     """
-    panels = _build_panels(aps)
+    panels = _build_panels(aps, station_field=station_field)
     dashboard: dict[str, object] = {
         "__inputs": [
             {
@@ -479,7 +482,7 @@ def generate_dashboard(
         ],
         "id": None,
         "uid": None,
-        **_dashboard_shell(panels),
+        **_dashboard_shell(panels, station_field=station_field),
     }
     return json.dumps(dashboard, indent=2)
 
@@ -488,15 +491,16 @@ def generate_dashboard_api(
     aps: list[APInfo],
     prometheus_uid: str,
     victorialogs_uid: str,
+    station_field: str = "station",
 ) -> dict[str, object]:
     """Generate Grafana dashboard dict for API push.
 
     Substitutes real datasource UIDs (no __inputs/__requires).
     """
-    panels = _build_panels(aps)
+    panels = _build_panels(aps, station_field=station_field)
     dashboard = {
         "uid": "wifi-dethrash",
-        **_dashboard_shell(panels),
+        **_dashboard_shell(panels, station_field=station_field),
     }
 
     # Replace datasource placeholders with real UIDs

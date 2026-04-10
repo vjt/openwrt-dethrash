@@ -12,6 +12,8 @@ class Config:
     grafana_url: str = ""
     grafana_api_key: str = ""
     mesh_ssids: list[str] = field(default_factory=list)
+    station_field: str = "station"
+    station_ip_field: str = "station_ip"
 
 
 def load_config(path: Path = CONFIG_PATH) -> Config:
@@ -28,4 +30,6 @@ def load_config(path: Path = CONFIG_PATH) -> Config:
         grafana_url=data.get("grafana_url", ""),
         grafana_api_key=data.get("grafana_api_key", ""),
         mesh_ssids=data.get("mesh_ssids", []),
+        station_field=data.get("station_field", "station"),
+        station_ip_field=data.get("station_ip_field", "station_ip"),
     )

@@ -7,6 +7,11 @@
   hostname. New `STATION_IP_FIELD` env var (default `station_ip`, set to
   `client_ip` in SIEM stack). Technitium DHCP `address` field parsed from
   reserved leases.
+- **Configurable output field names** — station-resolver field names (`STATION_FIELD`,
+  `STATION_IP_FIELD`) are fully configurable via env vars. Dashboard and VL
+  client use `station_field`/`station_ip_field` from config TOML or CLI
+  (`--station-field`, `--station-ip-field`) to match the configured VL field
+  names. No more hardcoded `fields.station`.
 - **`/metrics` endpoint: `ip` label** — `wifi_station_name{mac,station,ip} 1`
   gauge now includes the station's reserved DHCP IP address.
 - **Dashboard: `group_left(station, ip)`** — all panels using `_with_station()`
@@ -18,6 +23,8 @@
 - Station-resolver `lookup()` returns `(name, ip)` tuple instead of just name.
 - `processLine()` injects both hostname and IP fields into influx line protocol.
   IP field omitted gracefully when not available for a MAC.
+- Dashboard VL queries and station variable use configured field name instead
+  of hardcoded `fields.station`.
 
 ## 0.3.0 — 2026-03-30
 

@@ -26,9 +26,12 @@ class HostapdEvent:
 
 
 class VictoriaLogsClient:
-    def __init__(self, base_url: str, hostname_field: str = "tags.hostname"):
+    def __init__(self, base_url: str, hostname_field: str = "tags.hostname",
+                 station_field: str = "station"):
         self._base_url = base_url.rstrip("/")
         self._hostname_field = hostname_field
+        self._station_field = station_field
+        self._vl_station_field = f"fields.{station_field}"
         self._client = httpx.Client(timeout=30)
 
     def close(self) -> None:
@@ -92,8 +95,9 @@ class VictoriaLogsClient:
     def fetch_wifi_stations(self, limit: int = 10000) -> tuple[dict[str, str], list[str]]:
         """Extract MAC→hostname mapping and station list from hostapd events.
 
-        Parses AP-STA-CONNECTED events that have fields.station (set by
-        station-resolver). Returns (mac_names, station_list) where:
+        Parses AP-STA-CONNECTED events that have the station field (set by
+        station-resolver, field name configurable). Returns (mac_names,
+        station_list) where:
         - mac_names: lowercase MAC → hostname for Prometheus label_map
         - station_list: sorted unique hostnames for the dropdown
         Only includes actual WiFi clients, not all DHCP leases.
@@ -102,8 +106,8 @@ class VictoriaLogsClient:
             f"{self._base_url}/select/logsql/query",
             params={
                 "query": (
-                    "tags.appname:hostapd AND _msg:AP-STA-CONNECTED"
-                    " AND fields.station:*"
+                    f"tags.appname:hostapd AND _msg:AP-STA-CONNECTED"
+                    f" AND {self._vl_station_field}:*"
                 ),
                 "limit": str(limit),
             },
@@ -122,7 +126,7 @@ class VictoriaLogsClient:
             except json.JSONDecodeError:
                 continue
 
-            station = row.get("fields.station") or row.get("station", "")
+            station = row.get(self._vl_station_field) or row.get(self._station_field, "")
             if not station:
                 continue
 

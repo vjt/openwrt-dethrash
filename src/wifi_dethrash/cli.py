@@ -76,9 +76,12 @@ def _handle_error(source: str, exc: Exception) -> NoReturn:
 @click.option("--overlap-threshold", default=6, help="Max RSSI diff (dB) to count as overlap")
 @click.option("--snr-threshold", default=15, help="Min SNR (dB) for a healthy association")
 @click.option("--rssi-floor", default=-75, help="Min RSSI (dBm) below which txpower reduction is skipped")
+@click.option("--station-field", default=None, help="VictoriaLogs field name for station hostname (default: station)")
+@click.option("--station-ip-field", default=None, help="VictoriaLogs field name for station IP (default: station_ip)")
 def main(config_path, vm_url, vl_url, grafana_url, grafana_api_key,
          mesh_ssids, window, host_label, mac, generate_dashboard,
-         push_dashboard, annotate, overlap_threshold, snr_threshold, rssi_floor):
+         push_dashboard, annotate, overlap_threshold, snr_threshold, rssi_floor,
+         station_field, station_ip_field):
     """WiFi mesh thrashing analyzer for OpenWrt."""
     cfg = load_config(Path(config_path) if config_path else CONFIG_PATH)
 
@@ -88,6 +91,8 @@ def main(config_path, vm_url, vl_url, grafana_url, grafana_api_key,
     effective_grafana_url = grafana_url or cfg.grafana_url
     effective_grafana_api_key = grafana_api_key or cfg.grafana_api_key
     effective_mesh_ssids = list(mesh_ssids) if mesh_ssids else cfg.mesh_ssids
+    effective_station_field = station_field or cfg.station_field
+    effective_station_ip_field = station_ip_field or cfg.station_ip_field
 
     if push_dashboard or annotate:
         if not effective_grafana_url:
@@ -136,7 +141,7 @@ def main(config_path, vm_url, vl_url, grafana_url, grafana_api_key,
             click.echo(f"Found {len(aps)} APs: {', '.join(a.hostname for a in aps)}")
 
             if generate_dashboard:
-                dashboard_json = generate_dashboard(aps)
+                dashboard_json = generate_dashboard(aps, station_field=effective_station_field)
                 with open(generate_dashboard, "w") as f:
                     f.write(dashboard_json)
                 click.echo(f"Dashboard written to {generate_dashboard}")
@@ -148,7 +153,8 @@ def main(config_path, vm_url, vl_url, grafana_url, grafana_api_key,
                     prom_uid = gf.find_datasource_uid(datasources, "prometheus")
                     vl_uid = gf.find_datasource_uid(
                         datasources, "victoriametrics-logs-datasource")
-                    dashboard = generate_dashboard_api(aps, prom_uid, vl_uid)
+                    dashboard = generate_dashboard_api(aps, prom_uid, vl_uid,
+                                                       station_field=effective_station_field)
                     url = gf.push_dashboard(dashboard)
                 click.echo(f"Dashboard pushed: {effective_grafana_url}{url}")
                 return
@@ -166,7 +172,7 @@ def main(config_path, vm_url, vl_url, grafana_url, grafana_api_key,
         _handle_error(f"VictoriaMetrics ({effective_vm_url})", exc)
 
     try:
-        with VictoriaLogsClient(effective_vl_url) as vl:
+        with VictoriaLogsClient(effective_vl_url, station_field=effective_station_field) as vl:
             click.echo("Fetching hostapd events ...")
             events = vl.fetch_events(start, end, macs=macs)
 
