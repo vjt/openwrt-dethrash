@@ -1,5 +1,15 @@
 # OpenWrt SDK package Makefile for wifi-dethrash-collector
-# Use with: make package/wifi-dethrash-collector/compile V=s
+#
+# To build as a local feed:
+#   1. Clone this repo somewhere persistent on the build host
+#   2. Add to <openwrt>/feeds.conf:
+#        src-link custom /path/to/feeds-local
+#   3. Symlink this package dir into feeds-local/:
+#        ln -s /path/to/openwrt-dethrash/openwrt/wifi-dethrash-collector \
+#              <openwrt>/feeds-local/wifi-dethrash-collector
+#   4. ./scripts/feeds update custom && ./scripts/feeds install -a -p custom
+#   5. make menuconfig (Utilities -> wifi-dethrash-collector)
+#   6. make package/wifi-dethrash-collector/compile V=s
 
 include $(TOPDIR)/rules.mk
 
